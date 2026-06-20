@@ -1,0 +1,435 @@
+// ============================================================
+// Task repository — all task CRUD and queries
+// ============================================================
+
+import type Database from 'better-sqlite3';
+import type {
+    Task,
+    TaskWithRelations,
+    CreateTaskInput,
+    TaskFilters,
+    TaskSort,
+    TaskStatus,
+} from '../../core/types.js';
+import type { TaskRow, TaskRowWithRelations } from './rows.js';
+import { makeMapper, nullable, stringOrEmpty, boolFromInt, csvToArray } from './mapper.js';
+
+// Maps TaskRow columns to Task domain fields.
+const mapRow = makeMapper<TaskRow, Task>({
+    id: { col: 'id' },
+    title: { col: 'title' },
+    description: { col: 'description', transform: stringOrEmpty },
+    status: { col: 'status', transform: (v) => v as Task['status'] },
+    priority: { col: 'priority', transform: (v) => v as Task['priority'] },
+    projectId: { col: 'project_id', transform: nullable },
+    dueDate: { col: 'due_date', transform: nullable },
+    recurrence: { col: 'recurrence', transform: (v) => (v as Task['recurrence']) ?? null },
+    timeSpent: { col: 'time_spent', transform: (v) => (v as number) || 0 },
+    jiraKey: { col: 'jira_key', transform: nullable },
+    jiraId: { col: 'jira_id', transform: nullable },
+    githubRef: { col: 'github_ref', transform: nullable },
+    gitlabRef: { col: 'gitlab_ref', transform: nullable },
+    linearRef: { col: 'linear_ref', transform: nullable },
+    syncHash: { col: 'sync_hash', transform: nullable },
+    lastSyncedAt: { col: 'last_synced_at', transform: nullable },
+    createdAt: { col: 'created_at' },
+    updatedAt: { col: 'updated_at' },
+    completedAt: { col: 'completed_at', transform: nullable },
+    archivedAt: { col: 'archived_at', transform: nullable },
+});
+
+// Maps TaskRowWithRelations columns to TaskWithRelations; reuses Task fields + JOIN fields.
+const mapRowWithRelations = makeMapper<TaskRowWithRelations, TaskWithRelations>({
+    id: { col: 'id' },
+    title: { col: 'title' },
+    description: { col: 'description', transform: stringOrEmpty },
+    status: { col: 'status', transform: (v) => v as Task['status'] },
+    priority: { col: 'priority', transform: (v) => v as Task['priority'] },
+    projectId: { col: 'project_id', transform: nullable },
+    dueDate: { col: 'due_date', transform: nullable },
+    recurrence: { col: 'recurrence', transform: (v) => (v as Task['recurrence']) ?? null },
+    timeSpent: { col: 'time_spent', transform: (v) => (v as number) || 0 },
+    jiraKey: { col: 'jira_key', transform: nullable },
+    jiraId: { col: 'jira_id', transform: nullable },
+    githubRef: { col: 'github_ref', transform: nullable },
+    gitlabRef: { col: 'gitlab_ref', transform: nullable },
+    linearRef: { col: 'linear_ref', transform: nullable },
+    syncHash: { col: 'sync_hash', transform: nullable },
+    lastSyncedAt: { col: 'last_synced_at', transform: nullable },
+    createdAt: { col: 'created_at' },
+    updatedAt: { col: 'updated_at' },
+    completedAt: { col: 'completed_at', transform: nullable },
+    archivedAt: { col: 'archived_at', transform: nullable },
+    projectName: { col: 'project_name', transform: nullable },
+    projectColor: { col: 'project_color', transform: nullable },
+    tagNames: { col: 'tag_names', transform: csvToArray },
+    isBlocked: { col: 'is_blocked', transform: boolFromInt },
+});
+
+const PRIORITY_SORT_EXPR = `CASE t.priority WHEN 'urgent' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 END`;
+const DEFAULT_ORDER = `ORDER BY ${PRIORITY_SORT_EXPR} DESC, t.due_date ASC NULLS LAST`;
+
+export class TaskRepository {
+    constructor(private db: Database.Database) {}
+
+    /** Find tasks by jiraKey */
+    findByJiraKey(jiraKey: string): Task | null {
+        const row = this.db.prepare('SELECT * FROM tasks WHERE jira_key = ? LIMIT 1').get(jiraKey) as TaskRow | undefined;
+        return row ? mapRow(row) : null;
+    }
+
+    /** Find task by githubRef (e.g. owner/repo#123) */
+    findByGithubRef(githubRef: string): Task | null {
+        const row = this.db.prepare('SELECT * FROM tasks WHERE github_ref = ? LIMIT 1').get(githubRef) as TaskRow | undefined;
+        return row ? mapRow(row) : null;
+    }
+
+    /** Create a new task, returns the created task */
+    create(input: CreateTaskInput & {
+        jiraKey?: string; jiraId?: string; githubRef?: string;
+        syncHash?: string; lastSyncedAt?: string;
+        status?: string;
+    }): Task {
+        const sql = `INSERT INTO tasks (
+            title, description, status, priority,
+            project_id, due_date, recurrence,
+            jira_key, jira_id, github_ref,
+            sync_hash, last_synced_at
+        ) VALUES (
+            @title, @description, @status, @priority,
+            @projectId, @dueDate, @recurrence,
+            @jiraKey, @jiraId, @githubRef,
+            @syncHash, @lastSyncedAt
+        )`;
+
+        // Ensure all values are SQLite-bindable (string, number, buffer, or null)
+        const safe = (v: unknown): string | number | null => {
+            if (v === undefined || v === null) return null;
+            if (typeof v === 'string') return v;
+            if (typeof v === 'number') return v;
+            if (typeof v === 'object') return JSON.stringify(v);
+            return String(v);
+        };
+
+        const params = {
+            title: safe(input.title) || '',
+            description: safe(input.description) || '',
+            status: safe(input.status) || 'pending',
+            priority: safe(input.priority) || 'medium',
+            projectId: safe(input.projectId),
+            dueDate: safe(input.dueDate),
+            recurrence: safe(input.recurrence),
+            jiraKey: safe(input.jiraKey),
+            jiraId: safe(input.jiraId),
+            githubRef: safe(input.githubRef),
+            syncHash: safe(input.syncHash),
+            lastSyncedAt: safe(input.lastSyncedAt),
+        };
+
+        const result = this.db.prepare(sql).run(params);
+        return this.getById(Number(result.lastInsertRowid))!;
+    }
+
+    /** Get a task by ID */
+    getById(id: number): Task | null {
+        const row = this.db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as TaskRow | undefined;
+        return row ? mapRow(row) : null;
+    }
+
+    /** Get a task with all relations (project, tags, blocked status) */
+    getByIdWithRelations(id: number): TaskWithRelations | null {
+        const row = this.db.prepare(`
+            SELECT t.*,
+                   p.name as project_name,
+                   p.color as project_color,
+                   GROUP_CONCAT(DISTINCT tg.name) as tag_names,
+                   EXISTS(
+                       SELECT 1 FROM dependencies d
+                       JOIN tasks blocker ON d.depends_on_id = blocker.id
+                       WHERE d.task_id = t.id AND blocker.status NOT IN ('done', 'archived')
+                   ) as is_blocked
+            FROM tasks t
+            LEFT JOIN projects p ON t.project_id = p.id
+            LEFT JOIN task_tags tt ON t.id = tt.task_id
+            LEFT JOIN tags tg ON tt.tag_id = tg.id
+            WHERE t.id = ?
+            GROUP BY t.id
+        `).get(id) as TaskRowWithRelations | undefined;
+
+        return row ? mapRowWithRelations(row) : null;
+    }
+
+    /** List tasks with filters, sorting, and relations */
+    list(filters?: TaskFilters, sort?: TaskSort, limit?: number): TaskWithRelations[] {
+        const conditions: string[] = [];
+        const params: unknown[] = [];
+
+        if (filters) {
+            if (filters.ids && filters.ids.length > 0) {
+                conditions.push(`t.id IN (${filters.ids.map(() => '?').join(',')})`);
+                params.push(...filters.ids);
+            }
+
+            if (filters.status) {
+                const statuses = Array.isArray(filters.status) ? filters.status : [filters.status];
+                conditions.push(`t.status IN (${statuses.map(() => '?').join(',')})`);
+                params.push(...statuses);
+            } else if (!filters.includeArchived) {
+                conditions.push("t.status != 'archived'");
+            }
+
+            if (filters.priority) {
+                const priorities = Array.isArray(filters.priority) ? filters.priority : [filters.priority];
+                conditions.push(`t.priority IN (${priorities.map(() => '?').join(',')})`);
+                params.push(...priorities);
+            }
+
+            if (filters.projectId) {
+                conditions.push('t.project_id = ?');
+                params.push(filters.projectId);
+            }
+
+            if (filters.projectName) {
+                conditions.push('p.name = ?');
+                params.push(filters.projectName);
+            }
+
+            if (filters.dueDate) {
+                switch (filters.dueDate) {
+                    case 'today':
+                        conditions.push("t.due_date = date('now', 'localtime')");
+                        break;
+                    case 'overdue':
+                        conditions.push("t.due_date < date('now', 'localtime')");
+                        conditions.push("t.status NOT IN ('done', 'archived')");
+                        break;
+                    case 'this-week':
+                        conditions.push("t.due_date BETWEEN date('now', 'localtime') AND date('now', 'localtime', '+7 days')");
+                        break;
+                    default:
+                        conditions.push('t.due_date = ?');
+                        params.push(filters.dueDate);
+                }
+            }
+
+            if (filters.dueBefore) {
+                conditions.push('t.due_date <= ?');
+                params.push(filters.dueBefore);
+            }
+
+            if (filters.dueAfter) {
+                conditions.push('t.due_date >= ?');
+                params.push(filters.dueAfter);
+            }
+
+            if (filters.createdDate) {
+                switch (filters.createdDate) {
+                    case 'today':
+                        conditions.push("date(t.created_at, 'localtime') = date('now', 'localtime')");
+                        break;
+                    case 'yesterday':
+                        conditions.push("date(t.created_at, 'localtime') = date('now', 'localtime', '-1 day')");
+                        break;
+                    case 'this-week':
+                        conditions.push("date(t.created_at, 'localtime') >= date('now', 'localtime', '-7 days')");
+                        break;
+                    default:
+                        // ISO date string
+                        conditions.push('date(t.created_at) = ?');
+                        params.push(filters.createdDate);
+                }
+            }
+
+            if (filters.createdAfter) {
+                conditions.push('date(t.created_at) >= ?');
+                params.push(filters.createdAfter);
+            }
+
+            if (filters.createdBefore) {
+                conditions.push('date(t.created_at) <= ?');
+                params.push(filters.createdBefore);
+            }
+
+            if (filters.completedAfter) {
+                conditions.push('date(t.completed_at) >= ?');
+                params.push(filters.completedAfter);
+            }
+
+            if (filters.completedBefore) {
+                conditions.push('date(t.completed_at) <= ?');
+                params.push(filters.completedBefore);
+            }
+
+            if (filters.tags && filters.tags.length > 0) {
+                conditions.push(`t.id IN (
+                    SELECT tt2.task_id FROM task_tags tt2
+                    JOIN tags tg2 ON tt2.tag_id = tg2.id
+                    WHERE tg2.name IN (${filters.tags.map(() => '?').join(',')})
+                )`);
+                params.push(...filters.tags);
+            }
+        }
+
+        const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+        const SORT_COLUMN_MAP: Record<string, string> = {
+            id: 't.id', title: 't.title', priority: 't.priority',
+            due_date: 't.due_date', status: 't.status',
+            created_at: 't.created_at', updated_at: 't.updated_at'
+        };
+
+        let orderClause: string;
+        if (sort) {
+            const col = sort.field === 'priority'
+                ? PRIORITY_SORT_EXPR
+                : SORT_COLUMN_MAP[sort.field];
+            if (col) {
+                const nulls = sort.direction === 'asc' ? 'NULLS LAST' : 'NULLS FIRST';
+                orderClause = `ORDER BY ${col} ${sort.direction.toUpperCase()} ${nulls}`;
+            } else {
+                orderClause = DEFAULT_ORDER;
+            }
+        } else {
+            orderClause = DEFAULT_ORDER;
+        }
+
+        let limitClause = '';
+        if (limit) {
+            limitClause = 'LIMIT ?';
+            params.push(limit);
+        }
+
+        const rows = this.db.prepare(`
+            SELECT t.*,
+                   p.name as project_name,
+                   p.color as project_color,
+                   GROUP_CONCAT(DISTINCT tg.name) as tag_names,
+                   EXISTS(
+                       SELECT 1 FROM dependencies d
+                       JOIN tasks blocker ON d.depends_on_id = blocker.id
+                       WHERE d.task_id = t.id AND blocker.status NOT IN ('done', 'archived')
+                   ) as is_blocked
+            FROM tasks t
+            LEFT JOIN projects p ON t.project_id = p.id
+            LEFT JOIN task_tags tt ON t.id = tt.task_id
+            LEFT JOIN tags tg ON tt.tag_id = tg.id
+            ${whereClause}
+            GROUP BY t.id
+            ${orderClause}
+            ${limitClause}
+        `).all(...params) as TaskRowWithRelations[];
+
+        return rows.map(mapRowWithRelations);
+    }
+
+    /** Update a task by ID */
+    update(id: number, changes: Partial<import('../../core/types.js').UpdateTaskFields>): Task | null {
+        const fieldMap: Record<string, string> = {
+            title: 'title',
+            description: 'description',
+            status: 'status',
+            priority: 'priority',
+            projectId: 'project_id',
+            dueDate: 'due_date',
+            recurrence: 'recurrence',
+            timeSpent: 'time_spent',
+            completedAt: 'completed_at',
+            archivedAt: 'archived_at',
+            jiraKey: 'jira_key',
+            jiraId: 'jira_id',
+            githubRef: 'github_ref',
+            syncHash: 'sync_hash',
+            lastSyncedAt: 'last_synced_at',
+        };
+
+        const sets: string[] = [];
+        const params: unknown[] = [];
+
+        for (const [key, value] of Object.entries(changes)) {
+            const col = fieldMap[key];
+            if (col) {
+                sets.push(`${col} = ?`);
+                params.push(value);
+            }
+        }
+
+        if (sets.length === 0) return this.getById(id);
+
+        sets.push("updated_at = datetime('now')");
+        params.push(id);
+
+        this.db.prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+        return this.getById(id);
+    }
+
+    /** Soft delete (archive) a task */
+    archive(id: number): boolean {
+        const result = this.db.prepare(
+            "UPDATE tasks SET status = 'archived', archived_at = datetime('now'), updated_at = datetime('now') WHERE id = ?",
+        ).run(id);
+        return result.changes > 0;
+    }
+
+    /** Hard delete a task */
+    delete(id: number): boolean {
+        const result = this.db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
+        return result.changes > 0;
+    }
+
+    /** Archive all done tasks */
+    archiveAllDone(): number {
+        const result = this.db.prepare(
+            "UPDATE tasks SET status = 'archived', archived_at = datetime('now'), updated_at = datetime('now') WHERE status = 'done'",
+        ).run();
+        return result.changes;
+    }
+
+    /** Get task count by status */
+    countByStatus(): Record<TaskStatus, number> {
+        const rows = this.db.prepare(
+            'SELECT status, COUNT(*) as count FROM tasks GROUP BY status',
+        ).all() as { status: TaskStatus; count: number }[];
+
+        const result: Record<string, number> = { pending: 0, in_progress: 0, in_qa: 0, done: 0, archived: 0 };
+        for (const row of rows) {
+            result[row.status] = row.count;
+        }
+        return result as Record<TaskStatus, number>;
+    }
+
+    /** Get weekly stats */
+    weeklyStats(): { day: string; completedCount: number; totalTime: number }[] {
+        return this.db.prepare(`
+            SELECT date(completed_at, 'localtime') as day, COUNT(*) as completedCount,
+                   SUM(time_spent) as totalTime
+            FROM tasks
+            WHERE completed_at >= date('now', 'localtime', '-7 days') AND status IN ('done', 'archived')
+            GROUP BY date(completed_at, 'localtime')
+            ORDER BY day
+        `).all() as { day: string; completedCount: number; totalTime: number }[];
+    }
+
+    /** Search tasks by title/description (basic LIKE, fuse.js used at service layer) */
+    searchBasic(query: string, limit = 200): TaskWithRelations[] {
+        const escaped = query.replace(/[%_]/g, '\\$&');
+        const pattern = `%${escaped}%`;
+        const rows = this.db.prepare(`
+            SELECT t.*,
+                   p.name as project_name,
+                   p.color as project_color,
+                   GROUP_CONCAT(DISTINCT tg.name) as tag_names,
+                   0 as is_blocked
+            FROM tasks t
+            LEFT JOIN projects p ON t.project_id = p.id
+            LEFT JOIN task_tags tt ON t.id = tt.task_id
+            LEFT JOIN tags tg ON tt.tag_id = tg.id
+            WHERE (t.title LIKE ? ESCAPE '\\' OR t.description LIKE ? ESCAPE '\\')
+              AND t.status != 'archived'
+            GROUP BY t.id
+            ORDER BY ${PRIORITY_SORT_EXPR} DESC
+            LIMIT ?
+        `).all(pattern, pattern, limit) as TaskRowWithRelations[];
+
+        return rows.map(mapRowWithRelations);
+    }
+}
