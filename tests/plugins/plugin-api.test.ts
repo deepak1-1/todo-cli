@@ -1,13 +1,11 @@
 // Tests for createPluginAPI — focused on SafeTaskUpdate runtime key filtering
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
-import { up } from '../../src/storage/migrations/001-initial.js';
-import { up as up002 } from '../../src/storage/migrations/002-time-tracking.js';
-import { up as up003 } from '../../src/storage/migrations/003-project-name-nocase.js';
-import { up as up004 } from '../../src/storage/migrations/004-fix-tasks-fk.js';
-import { up as up005 } from '../../src/storage/migrations/005-add-in-qa-status.js';
+import { createTestDb } from '../../src/storage/database.js';
+import { runMigrations } from '../../src/storage/migrations/runner.js';
 import { TaskRepository } from '../../src/storage/repositories/task.repo.js';
+import { StatusRepository } from '../../src/storage/repositories/status.repo.js';
 
 // Mock getContext so plugin-api uses our in-memory repo, not the singleton.
 vi.mock('../../src/commands/context.js', () => ({
@@ -30,14 +28,8 @@ let db: Database.Database;
 let taskRepo: TaskRepository;
 
 beforeEach(() => {
-    db = new Database(':memory:');
-    db.pragma('foreign_keys = ON');
-    // Apply all migrations to get current schema.
-    up(db);
-    up002(db);
-    up003(db);
-    up004(db);
-    up005(db);
+    db = createTestDb();
+    runMigrations(db);
     taskRepo = new TaskRepository(db);
 
     // Wire getContext mock to return our in-memory repo.
@@ -49,7 +41,12 @@ beforeEach(() => {
         actionLog: {} as never,
         depRepo: {} as never,
         trackingRepo: {} as never,
+        statusRepo: new StatusRepository(db),
     });
+});
+
+afterEach(() => {
+    db.close();
 });
 
 describe('createPluginAPI.updateTask', () => {

@@ -2,7 +2,8 @@
 // Jira Cloud integration provider
 // ============================================================
 
-import { Task, CreateTaskInput, TaskPriority, TaskStatus } from '../../core/types.js';
+import { Task, CreateTaskInput, TaskPriority } from '../../core/types.js';
+import type { StatusDef } from '../../core/status.js';
 import {
     IntegrationProvider,
     CredentialStore,
@@ -36,12 +37,13 @@ function mapJiraPriority(jiraPriority: string | undefined): TaskPriority | undef
     return priorityMap[jiraPriority];
 }
 
-function mapJiraStatus(jiraStatus: string | undefined): TaskStatus {
-    if (!jiraStatus) return 'pending';
+function mapJiraStatus(jiraStatus: string | undefined): string {
+    if (!jiraStatus) return 'todo';
     const lower = jiraStatus.toLowerCase();
     if (lower === 'done' || lower === 'closed' || lower === 'resolved' || lower.startsWith('released')) return 'done';
-    if (lower === 'in progress' || lower === 'in review' || lower === 'in development') return 'in_progress';
-    return 'pending';
+    if (lower === 'in review' || lower === 'in qa' || lower === 'review') return 'in_review';
+    if (lower === 'in progress' || lower === 'in development') return 'in_progress';
+    return 'todo';
 }
 
 function mapLocalPriority(localPriority: TaskPriority): string {
@@ -202,7 +204,7 @@ const jiraProvider: IntegrationProvider = {
         return tasks;
     },
 
-    async push(store: CredentialStore, task: Task, externalRef: string): Promise<PushResult> {
+    async push(store: CredentialStore, task: Task, externalRef: string, _statusDefs?: StatusDef[]): Promise<PushResult> {
         const domain = await store.get(JIRA_DOMAIN_KEY);
         const email = await store.get(JIRA_EMAIL_KEY);
         const token = await store.get(JIRA_TOKEN_KEY);
@@ -218,12 +220,14 @@ const jiraProvider: IntegrationProvider = {
 
             const transitions = await client.getTransitions(externalRef);
 
-            // Map local status to Jira transition
+            // Map local status to Jira transition names
             const statusToJiraNames: Record<string, string[]> = {
                 done: ['Done', 'Closed', 'Resolved'],
                 in_progress: ['In Progress', 'In Development'],
-                in_qa: ['In Review', 'In QA', 'Review'],
-                pending: ['To Do', 'Open', 'Backlog', 'New'],
+                in_review: ['In Review', 'In QA', 'Review'],
+                todo: ['To Do', 'Open', 'Backlog', 'New'],
+                blocked: ['Blocked', 'On Hold'],
+                archived: ['Done', 'Closed'],
             };
 
             let transitionId: string | undefined;
@@ -275,7 +279,7 @@ const jiraProvider: IntegrationProvider = {
         }
     },
 
-    mapToLocal(external: ExternalTask): Partial<CreateTaskInput> & { status?: TaskStatus } {
+    mapToLocal(external: ExternalTask): Partial<CreateTaskInput> & { status?: string } {
         return {
             title: external.title,
             description: external.description,

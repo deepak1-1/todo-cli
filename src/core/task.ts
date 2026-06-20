@@ -6,9 +6,7 @@ import {
     type Task,
     type CreateTaskInput,
     type UpdateTaskInput,
-    type TaskStatus,
     type TaskPriority,
-    TASK_STATUSES,
     TASK_PRIORITIES,
 } from './types.js';
 import { getNextOccurrence } from './scheduler.js';
@@ -59,37 +57,6 @@ export function validateUpdateInput(input: UpdateTaskInput): UpdateTaskInput {
     }
 
     return normalized;
-}
-
-/** Check if a status transition is valid — all transitions are allowed */
-export function isValidTransition(_from: TaskStatus, _to: TaskStatus): boolean {
-    return true;
-}
-
-/** Validate a status transition — any status to any status is allowed */
-export function validateTransition(_task: Task, newStatus: TaskStatus): void {
-    if (!TASK_STATUSES.includes(newStatus)) {
-        throw new TaskValidationError(
-            `Invalid status "${newStatus}". Must be one of: ${TASK_STATUSES.join(', ')}`,
-        );
-    }
-}
-
-/** Get timestamp fields to set on a status transition */
-export function getTransitionTimestamps(
-    newStatus: TaskStatus,
-): Partial<Pick<Task, 'completedAt' | 'archivedAt'>> {
-    const now = new Date().toISOString();
-    switch (newStatus) {
-        case 'done':
-            return { completedAt: now };
-        case 'archived':
-            return { archivedAt: now };
-        case 'pending':
-        case 'in_progress':
-        case 'in_qa':
-            return { completedAt: null, archivedAt: null };
-    }
 }
 
 /** Priority comparison (higher priority = higher number) */

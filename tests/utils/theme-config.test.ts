@@ -9,7 +9,7 @@
 import chalk from 'chalk';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import '../../src/utils/initThemes.js';
-import { loadTheme, theme, disableColors, listThemes, registerTheme, type ThemeDefinition, type Palette } from '../../src/utils/theme.js';
+import { loadTheme, theme, disableColors, listThemes, registerTheme, type Palette } from '../../src/utils/theme.js';
 import { configureColor } from '../../src/utils/color.js';
 import { EXIT } from '../../src/utils/exit.js';
 

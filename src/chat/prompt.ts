@@ -18,7 +18,7 @@ export function buildSystemPrompt(summary?: TaskSummary): string {
 ACTION SELECTION (most important):
 - "query" with "sql": aggregation, counts, time analysis, "how many", "per day", "by project", GROUP BY, SUM, AVG. ALWAYS for analytics.
 - "list" with "filters": simple filtering by status/priority/project/tag/due
-- "update_status": change status ONLY (done/in_progress/pending/in_qa/archived)
+- "update_status": change status ONLY (use the status key, e.g. done/in_progress/in_review/todo/archived)
 - "update_task": change title/description/priority/project/tags/due
 - "adjust_time": add/subtract tracked time from a task (timeAdjustSeconds in seconds, negative=subtract)
 - "create_task": new task
@@ -35,9 +35,10 @@ NOTE: duration and time_spent are in SECONDS. For hours: ROUND(value/3600.0,1)
 Examples:
 {"action":"create_task","title":"buy groceries","due":"tomorrow","priority":"high"}
 {"action":"update_status","taskId":5,"status":"done"}
+{"action":"update_status","taskId":3,"status":"in_review"}
 {"action":"update_task","taskId":3,"title":"new name","project":"backend","tags":["urgent"]}
 {"action":"list","filters":{"due":"today"}}
-{"action":"list","filters":{"priority":"high","status":"pending"}}
+{"action":"list","filters":{"priority":"high","status":"todo"}}
 {"action":"query","sql":"SELECT date(started_at) as day, ROUND(SUM(duration)/3600.0,1) as hours FROM time_tracking GROUP BY day HAVING SUM(duration)>28800"}
 {"action":"query","sql":"SELECT priority, COUNT(*) as count FROM tasks WHERE status!='archived' GROUP BY priority"}
 {"action":"query","sql":"SELECT COUNT(*) FROM tasks WHERE status='done' AND completed_at>=date('now','-7 days')"}

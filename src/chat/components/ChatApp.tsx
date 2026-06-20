@@ -60,12 +60,13 @@ function ChatAppInner() {
                 modelRef.current = model;
                 executorRef.current = executor;
 
+                const statusKeys = ctx.statusRepo.list().map(d => d.key);
                 await model.ensureAndLoad({
                     total,
-                    pending: counts.pending || 0,
+                    pending: counts.todo || 0,
                     inProgress: counts.in_progress || 0,
                     overdue,
-                });
+                }, statusKeys);
 
                 setModelReady(true);
                 setModelStatus('');

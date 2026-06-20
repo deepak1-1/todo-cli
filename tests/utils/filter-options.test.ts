@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createTestDb } from '../../src/storage/database.js';
 import { runMigrations } from '../../src/storage/migrations/runner.js';
 import { TaskRepository } from '../../src/storage/repositories/task.repo.js';
@@ -8,6 +8,7 @@ import { TimerRepository } from '../../src/storage/repositories/timer.repo.js';
 import { ActionLogRepository } from '../../src/storage/repositories/action-log.repo.js';
 import { DependencyRepository } from '../../src/storage/repositories/dependency.repo.js';
 import { TrackingRepository } from '../../src/storage/repositories/tracking.repo.js';
+import { StatusRepository } from '../../src/storage/repositories/status.repo.js';
 import type { AppContext } from '../../src/commands/context.js';
 import { filterAndSearchTasks } from '../../src/utils/filter-options.js';
 import type Database from 'better-sqlite3';
@@ -25,6 +26,7 @@ function buildCtx(database: Database.Database): AppContext {
         actionLog: new ActionLogRepository(database),
         depRepo: new DependencyRepository(database),
         trackingRepo: new TrackingRepository(database),
+        statusRepo: new StatusRepository(database),
     };
 }
 
@@ -34,14 +36,21 @@ beforeEach(() => {
     ctx = buildCtx(db);
 });
 
+afterEach(() => {
+    db.close();
+});;
+
 describe('filterAndSearchTasks', () => {
     it('returns all active tasks when no filters provided', () => {
         ctx.taskRepo.create({ title: 'Alpha' });
         ctx.taskRepo.create({ title: 'Beta' });
         const { tasks, filters, sort } = filterAndSearchTasks(ctx, {});
-        // Default filter excludes archived; both tasks are pending so both appear
+        // Default filter excludes archived; both tasks are todo so both appear
         expect(tasks.length).toBe(2);
-        expect(filters.status).toEqual(['pending', 'in_progress', 'in_qa', 'done']);
+        // Default includes all non-archived statuses from the registry
+        expect(Array.isArray(filters.status)).toBe(true);
+        expect((filters.status as string[]).includes('todo')).toBe(true);
+        expect((filters.status as string[]).includes('archived')).toBe(false);
         expect(sort).toBeUndefined();
     });
 

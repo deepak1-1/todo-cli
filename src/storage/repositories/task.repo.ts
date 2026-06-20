@@ -9,7 +9,6 @@ import type {
     CreateTaskInput,
     TaskFilters,
     TaskSort,
-    TaskStatus,
 } from '../../core/types.js';
 import type { TaskRow, TaskRowWithRelations } from './rows.js';
 import { makeMapper, nullable, stringOrEmpty, boolFromInt, csvToArray } from './mapper.js';
@@ -114,7 +113,7 @@ export class TaskRepository {
         const params = {
             title: safe(input.title) || '',
             description: safe(input.description) || '',
-            status: safe(input.status) || 'pending',
+            status: safe(input.status) || 'todo',
             priority: safe(input.priority) || 'medium',
             projectId: safe(input.projectId),
             dueDate: safe(input.dueDate),
@@ -146,7 +145,8 @@ export class TaskRepository {
                    EXISTS(
                        SELECT 1 FROM dependencies d
                        JOIN tasks blocker ON d.depends_on_id = blocker.id
-                       WHERE d.task_id = t.id AND blocker.status NOT IN ('done', 'archived')
+                       WHERE d.task_id = t.id
+                         AND blocker.status NOT IN (SELECT key FROM statuses WHERE completes = 1 OR archives = 1)
                    ) as is_blocked
             FROM tasks t
             LEFT JOIN projects p ON t.project_id = p.id
@@ -175,7 +175,8 @@ export class TaskRepository {
                 conditions.push(`t.status IN (${statuses.map(() => '?').join(',')})`);
                 params.push(...statuses);
             } else if (!filters.includeArchived) {
-                conditions.push("t.status != 'archived'");
+                // Exclude archived statuses via JOIN; avoids hardcoding keys
+                conditions.push('t.status NOT IN (SELECT key FROM statuses WHERE archives = 1)');
             }
 
             if (filters.priority) {
@@ -201,7 +202,7 @@ export class TaskRepository {
                         break;
                     case 'overdue':
                         conditions.push("t.due_date < date('now', 'localtime')");
-                        conditions.push("t.status NOT IN ('done', 'archived')");
+                        conditions.push('t.status NOT IN (SELECT key FROM statuses WHERE completes = 1 OR archives = 1)');
                         break;
                     case 'this-week':
                         conditions.push("t.due_date BETWEEN date('now', 'localtime') AND date('now', 'localtime', '+7 days')");
@@ -307,7 +308,8 @@ export class TaskRepository {
                    EXISTS(
                        SELECT 1 FROM dependencies d
                        JOIN tasks blocker ON d.depends_on_id = blocker.id
-                       WHERE d.task_id = t.id AND blocker.status NOT IN ('done', 'archived')
+                       WHERE d.task_id = t.id
+                         AND blocker.status NOT IN (SELECT key FROM statuses WHERE completes = 1 OR archives = 1)
                    ) as is_blocked
             FROM tasks t
             LEFT JOIN projects p ON t.project_id = p.id
@@ -362,11 +364,14 @@ export class TaskRepository {
         return this.getById(id);
     }
 
-    /** Soft delete (archive) a task */
+    /** Soft delete (archive) a task — sets to the first archiving status */
     archive(id: number): boolean {
+        const archiveStatus = (this.db.prepare(
+            "SELECT key FROM statuses WHERE archives = 1 ORDER BY sort_order ASC LIMIT 1",
+        ).get() as { key: string } | undefined)?.key ?? 'archived';
         const result = this.db.prepare(
-            "UPDATE tasks SET status = 'archived', archived_at = datetime('now'), updated_at = datetime('now') WHERE id = ?",
-        ).run(id);
+            `UPDATE tasks SET status = ?, archived_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
+        ).run(archiveStatus, id);
         return result.changes > 0;
     }
 
@@ -376,34 +381,42 @@ export class TaskRepository {
         return result.changes > 0;
     }
 
-    /** Archive all done tasks */
+    /** Archive all completing tasks (status.completes=1) — routes to first archiving status */
     archiveAllDone(): number {
-        const result = this.db.prepare(
-            "UPDATE tasks SET status = 'archived', archived_at = datetime('now'), updated_at = datetime('now') WHERE status = 'done'",
-        ).run();
+        const archiveStatus = (this.db.prepare(
+            "SELECT key FROM statuses WHERE archives = 1 ORDER BY sort_order ASC LIMIT 1",
+        ).get() as { key: string } | undefined)?.key ?? 'archived';
+        const result = this.db.prepare(`
+            UPDATE tasks SET status = ?, archived_at = datetime('now'), updated_at = datetime('now')
+            WHERE status IN (SELECT key FROM statuses WHERE completes = 1)
+        `).run(archiveStatus);
         return result.changes;
     }
 
-    /** Get task count by status */
-    countByStatus(): Record<TaskStatus, number> {
+    /** Get task count by status (all known statuses, zero-filled from statuses table). */
+    countByStatus(): Record<string, number> {
         const rows = this.db.prepare(
             'SELECT status, COUNT(*) as count FROM tasks GROUP BY status',
-        ).all() as { status: TaskStatus; count: number }[];
+        ).all() as { status: string; count: number }[];
 
-        const result: Record<string, number> = { pending: 0, in_progress: 0, in_qa: 0, done: 0, archived: 0 };
+        const result: Record<string, number> = {};
+        // Seed with zero for all known statuses
+        const allStatuses = this.db.prepare('SELECT key FROM statuses').all() as { key: string }[];
+        for (const { key } of allStatuses) result[key] = 0;
         for (const row of rows) {
             result[row.status] = row.count;
         }
-        return result as Record<TaskStatus, number>;
+        return result;
     }
 
-    /** Get weekly stats */
+    /** Get weekly stats — counts tasks with completes=1 or archives=1 status */
     weeklyStats(): { day: string; completedCount: number; totalTime: number }[] {
         return this.db.prepare(`
             SELECT date(completed_at, 'localtime') as day, COUNT(*) as completedCount,
                    SUM(time_spent) as totalTime
             FROM tasks
-            WHERE completed_at >= date('now', 'localtime', '-7 days') AND status IN ('done', 'archived')
+            WHERE completed_at >= date('now', 'localtime', '-7 days')
+              AND status IN (SELECT key FROM statuses WHERE completes = 1 OR archives = 1)
             GROUP BY date(completed_at, 'localtime')
             ORDER BY day
         `).all() as { day: string; completedCount: number; totalTime: number }[];
@@ -424,7 +437,7 @@ export class TaskRepository {
             LEFT JOIN task_tags tt ON t.id = tt.task_id
             LEFT JOIN tags tg ON tt.tag_id = tg.id
             WHERE (t.title LIKE ? ESCAPE '\\' OR t.description LIKE ? ESCAPE '\\')
-              AND t.status != 'archived'
+              AND t.status NOT IN (SELECT key FROM statuses WHERE archives = 1)
             GROUP BY t.id
             ORDER BY ${PRIORITY_SORT_EXPR} DESC
             LIMIT ?

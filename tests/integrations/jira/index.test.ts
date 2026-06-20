@@ -328,11 +328,11 @@ describe('jiraProvider.mapToLocal', () => {
         expect(jiraProvider.mapToLocal(external).status).toBe('done');
     });
 
-    it('maps unknown Jira status to "pending"', () => {
+    it('maps unknown Jira status to "todo"', () => {
         const external: ExternalTask = {
             externalId: '1', externalRef: 'PROJ-1', externalUrl: '', title: 'X', status: 'Weird State',
         };
-        expect(jiraProvider.mapToLocal(external).status).toBe('pending');
+        expect(jiraProvider.mapToLocal(external).status).toBe('todo');
     });
 
     it('passes through title, description, and dueDate', () => {

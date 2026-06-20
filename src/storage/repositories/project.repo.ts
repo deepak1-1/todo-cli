@@ -108,7 +108,7 @@ export class ProjectRepository {
                    COUNT(t.id) as total,
                    SUM(CASE WHEN t.priority = 'urgent' THEN 1 ELSE 0 END) as urgent
             FROM projects p
-            LEFT JOIN tasks t ON t.project_id = p.id AND t.status NOT IN ('archived')
+            LEFT JOIN tasks t ON t.project_id = p.id AND t.status NOT IN (SELECT key FROM statuses WHERE archives = 1)
             WHERE p.archived = 0
             GROUP BY p.id
             ORDER BY p.name

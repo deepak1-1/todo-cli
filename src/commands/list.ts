@@ -57,5 +57,5 @@ export const listCommand = cmd
             console.log(theme().muted.chalk(`  ${tasks.length} result${tasks.length !== 1 ? 's' : ''} for "${opts.search}":\n`));
         }
 
-        console.log(formatTaskTable(tasks));
+        console.log(formatTaskTable(tasks, ctx.statusRepo.list()));
     });

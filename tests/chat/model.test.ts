@@ -1,6 +1,6 @@
-// Tests for validateIntent and the model's error-path behaviour
+// Tests for validateIntent, buildIntentSchema, and model error-path behaviour
 import { describe, it, expect } from 'vitest';
-import { validateIntent } from '../../src/chat/intent.js';
+import { validateIntent, buildIntentSchema } from '../../src/chat/intent.js';
 
 describe('validateIntent', () => {
     it('returns null for a non-object value', () => {
@@ -106,5 +106,30 @@ describe('JSON.parse + validateIntent integration', () => {
     it('JSON.parse throws on unparseable input and caller should catch', () => {
         // Verifies the error path stays reachable — validateIntent is never called
         expect(() => JSON.parse('not json {')).toThrow();
+    });
+});
+
+describe('buildIntentSchema', () => {
+    it('includes custom status keys in the status enum', () => {
+        const schema = buildIntentSchema(['todo', 'done', 'staging']);
+        const statusProp = schema.properties.status as { type: string; enum: string[] };
+        expect(statusProp.enum).toContain('staging');
+        expect(statusProp.enum).toContain('todo');
+        expect(statusProp.enum).toContain('done');
+    });
+
+    it('falls back to builtins when an empty array is passed', () => {
+        const schema = buildIntentSchema([]);
+        const statusProp = schema.properties.status as { type: string; enum: string[] };
+        expect(statusProp.enum).toContain('todo');
+        expect(statusProp.enum).toContain('done');
+    });
+
+    it('strips keys that contain non-safe characters', () => {
+        const schema = buildIntentSchema(['valid_key', 'bad key', 'also-bad']);
+        const statusProp = schema.properties.status as { type: string; enum: string[] };
+        expect(statusProp.enum).toContain('valid_key');
+        expect(statusProp.enum).not.toContain('bad key');
+        expect(statusProp.enum).not.toContain('also-bad');
     });
 });

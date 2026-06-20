@@ -2,10 +2,11 @@
 import type { AppContext } from '../commands/context.js';
 import { getDb } from '../storage/database.js';
 import type { Intent } from './intent.js';
-import type { Task, TaskFilters, TaskStatus, TaskPriority } from '../core/types.js';
+import type { Task, TaskFilters, TaskPriority } from '../core/types.js';
 import { formatDuration } from '../core/timer.js';
 import { parseDate } from '../utils/date.js';
-import { formatTaskDetail, success, error } from '../utils/format.js';
+import { formatTaskDetail, success, error, statusChalkFn } from '../utils/format.js';
+import type { StatusDef } from '../core/status.js';
 import { theme } from '../utils/theme.js';
 import { colorizeProject } from '../utils/project-color.js';
 import { getHookManager } from '../plugins/hook-manager.js';
@@ -42,12 +43,17 @@ function formatPlainTable(rows: Record<string, unknown>[]): string {
 }
 
 /** Format task list as plain text (no box borders) */
-function formatTaskList(tasks: { id: number; title: string; status: string; priority: string; projectName?: string | null; projectColor?: string | null }[]): string {
+function formatTaskList(
+    tasks: { id: number; title: string; status: string; priority: string; projectName?: string | null; projectColor?: string | null }[],
+    defs?: StatusDef[],
+): string {
     const t = theme();
     const lines = tasks.map(tk => {
         const id = t.id.chalk(`#${tk.id}`);
         const priority = t[`priority${tk.priority.charAt(0).toUpperCase()}${tk.priority.slice(1)}` as keyof typeof t]?.chalk(tk.priority) ?? tk.priority;
-        const status = t[`status${tk.status.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join('')}` as keyof typeof t]?.chalk(tk.status) ?? tk.status;
+        const def = defs?.find(d => d.key === tk.status);
+        const statusLabel = def ? `${def.icon} ${def.label}` : tk.status;
+        const status = statusChalkFn(tk.status, defs)(statusLabel);
         const project = tk.projectName ? colorizeProject(tk.projectName, tk.projectColor) : '';
         return `  ${id}  ${priority.padEnd(16)}  ${tk.title}  ${project}  ${status}`;
     });
@@ -188,7 +194,11 @@ export class IntentExecutor {
 
     private updateStatus(intent: Intent): ExecutionResult {
         if (!intent.taskId) return { message: 'Which task? Provide a task number.' };
-        if (!intent.status) return { message: 'What status? (pending, in_progress, in_qa, done, archived)' };
+        if (!intent.status) {
+            const defs = this.ctx.statusRepo.list();
+            const keys = defs.map(d => d.key).join(', ');
+            return { message: `What status? (${keys})` };
+        }
 
         const task = this.ctx.taskRepo.getById(intent.taskId);
         if (!task) return { message: error(`Task #${intent.taskId} not found.`) };
@@ -202,12 +212,10 @@ export class IntentExecutor {
             return { message: msg };
         }
 
-        const labels: Record<string, string> = {
-            pending: 'reopened', in_progress: 'started', in_qa: 'moved to review',
-            done: 'completed', archived: 'archived',
-        };
-        const statusLabel = intent.status as TaskStatus;
-        const base = success(`Task #${intent.taskId} ${labels[statusLabel] || statusLabel}: ${task.title}`);
+        const defs = this.ctx.statusRepo.list();
+        const def = defs.find(d => d.key === intent.status);
+        const statusLabel = def?.label ?? intent.status;
+        const base = success(`Task #${intent.taskId} marked as ${statusLabel}: ${task.title}`);
         if (recurring) {
             return { message: `${base}\n  Next occurrence: task #${recurring.id} due ${recurring.dueDate.slice(0, 10)}` };
         }
@@ -218,7 +226,7 @@ export class IntentExecutor {
         const filters: TaskFilters = { includeArchived: false };
 
         if (intent.filters) {
-            if (intent.filters.status) filters.status = intent.filters.status as TaskStatus;
+            if (intent.filters.status) filters.status = intent.filters.status;
             if (intent.filters.priority) filters.priority = intent.filters.priority as TaskPriority;
             if (intent.filters.project) filters.projectName = intent.filters.project;
             if (intent.filters.tag) filters.tags = [intent.filters.tag];
@@ -229,9 +237,10 @@ export class IntentExecutor {
         const tasks = this.ctx.taskRepo.list(filters);
         if (tasks.length === 0) return { message: 'No tasks found.' };
 
+        const defs = this.ctx.statusRepo.list();
         return {
             message: `Found ${tasks.length} task${tasks.length !== 1 ? 's' : ''}:`,
-            taskOutput: formatTaskList(tasks),
+            taskOutput: formatTaskList(tasks, defs),
         };
     }
 
@@ -248,16 +257,16 @@ export class IntentExecutor {
         const counts = this.ctx.taskRepo.countByStatus();
         const total = Object.values(counts).reduce((a, b) => a + b, 0);
         const overdue = this.ctx.taskRepo.list({ dueDate: 'overdue' }).length;
+        const defs = this.ctx.statusRepo.list();
 
-        const lines = [
-            `Total: ${total} tasks`,
-            `  Pending:     ${counts.pending || 0}`,
-            `  In Progress: ${counts.in_progress || 0}`,
-            `  In Review:   ${counts.in_qa || 0}`,
-            `  Done:        ${counts.done || 0}`,
-            `  Archived:    ${counts.archived || 0}`,
-        ];
-        if (overdue > 0) lines.push(`  Overdue:     ${overdue}`);
+        const lines = [`Total: ${total} tasks`];
+        for (const def of defs) {
+            const count = counts[def.key] || 0;
+            if (count > 0) {
+                lines.push(`  ${def.label}:`.padEnd(18) + count);
+            }
+        }
+        if (overdue > 0) lines.push(`  Overdue:`.padEnd(18) + overdue);
 
         return { message: lines.join('\n') };
     }
@@ -394,7 +403,8 @@ export class IntentExecutor {
         try {
             const ghProvider = (await import('../integrations/github/index.js')).default;
             const { EncryptedCredentialStore } = await import('../plugins/index.js');
-            const result = await ghProvider.push(new EncryptedCredentialStore(), task, task.githubRef);
+            const statusDefs = this.ctx.statusRepo.list();
+            const result = await ghProvider.push(new EncryptedCredentialStore(), task, task.githubRef, statusDefs);
             return { message: result.success ? success(result.message) : error(result.message) };
         } catch (err: unknown) {
             return { message: error(`GitHub push failed: ${err instanceof Error ? err.message : String(err)}`) };

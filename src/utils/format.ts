@@ -1,6 +1,8 @@
 // Output formatters — theme-aware styling, tables.
 
-import type { TaskWithRelations, TaskPriority, TaskStatus, SearchResult } from '../core/types.js';
+import chalk from 'chalk';
+import type { TaskWithRelations, TaskPriority, SearchResult } from '../core/types.js';
+import type { StatusDef } from '../core/status.js';
 import { makeTable } from './table.js';
 import { formatDateDisplay, isOverdue, formatLocalDateTime } from './date.js';
 import { formatDuration } from '../core/timer.js';
@@ -21,13 +23,27 @@ export function priorityChalkFn(priority: TaskPriority): (s: string) => string {
     return map[priority] ?? ((s: string) => s);
 }
 
-/** Return the chalk function for a given status (reads active theme). */
-export function statusChalkFn(status: TaskStatus): (s: string) => string {
+/** Resolve a free-text chalk color name to a chalk function. Falls back to identity for unknown names. */
+function resolveChalkColor(colorName: string): (s: string) => string {
+    const name = colorName.toLowerCase();
+    // Support named chalk colors and modifiers as a dynamic lookup
+    const fn = (chalk as unknown as Record<string, unknown>)[name];
+    if (typeof fn === 'function') return fn.bind(chalk) as (s: string) => string;
+    return (s: string) => s;
+}
+
+/** Return the chalk function for a given status key. Uses def icon/color when defs provided. Falls back to identity. */
+export function statusChalkFn(status: string, defs?: StatusDef[]): (s: string) => string {
+    if (defs) {
+        const def = defs.find(d => d.key === status);
+        if (def) return resolveChalkColor(def.color);
+    }
     const t = theme();
-    const map: Record<TaskStatus, (s: string) => string> = {
-        pending: (s) => t.statusPending.chalk(s),
+    const map: Record<string, (s: string) => string> = {
+        todo: (s) => t.statusPending.chalk(s),
         in_progress: (s) => t.statusInProgress.chalk(s),
-        in_qa: (s) => t.statusInQa.chalk(s),
+        in_review: (s) => t.statusInQa.chalk(s),
+        blocked: (s) => t.error.chalk(s),
         done: (s) => t.statusDone.chalk(s),
         archived: (s) => t.statusArchived.chalk(s),
     };
@@ -40,14 +56,6 @@ export const priorityColors: Record<TaskPriority, (s: string) => string> = {
     get high() { return priorityChalkFn('high'); },
     get medium() { return priorityChalkFn('medium'); },
     get low() { return priorityChalkFn('low'); },
-};
-
-export const statusColors: Record<TaskStatus, (s: string) => string> = {
-    get pending() { return statusChalkFn('pending'); },
-    get in_progress() { return statusChalkFn('in_progress'); },
-    get in_qa() { return statusChalkFn('in_qa'); },
-    get done() { return statusChalkFn('done'); },
-    get archived() { return statusChalkFn('archived'); },
 };
 
 export function formatPriority(priority: TaskPriority): string {
@@ -67,16 +75,22 @@ export function formatPriorityBracket(priority: TaskPriority): string {
 
 // ---- Status formatting ----
 
-const statusIcons: Record<TaskStatus, string> = {
-    pending: '○',
+// Builtin fallback icons — used when no StatusDef registry is available.
+const STATUS_ICONS: Record<string, string> = {
+    todo: '○',
     in_progress: '◐',
-    in_qa: '◑',
-    done: '●',
-    archived: '◌',
+    in_review: '◔',
+    blocked: '⊘',
+    done: '✓',
+    archived: '⌀',
 };
 
-export function formatStatus(status: TaskStatus): string {
-    return statusChalkFn(status)(`${statusIcons[status]} ${status.replace('_', ' ')}`);
+/** Format a status string. When defs are provided, uses the registry icon/color for custom statuses. */
+export function formatStatus(status: string, defs?: StatusDef[]): string {
+    const def = defs?.find(d => d.key === status);
+    const icon = def ? def.icon : (STATUS_ICONS[status] ?? '○');
+    const label = def ? def.label : status.replace(/_/g, ' ');
+    return statusChalkFn(status, defs)(`${icon} ${label}`);
 }
 
 // ---- Task formatting ----
@@ -113,7 +127,7 @@ export function formatTaskOneLine(task: TaskWithRelations): string {
 }
 
 /** Format task list as a table */
-export function formatTaskTable(tasks: (TaskWithRelations | SearchResult)[]): string {
+export function formatTaskTable(tasks: (TaskWithRelations | SearchResult)[], defs?: StatusDef[]): string {
     const t = theme();
     if (tasks.length === 0) return t.muted.chalk('  No tasks found.');
 
@@ -141,7 +155,7 @@ export function formatTaskTable(tasks: (TaskWithRelations | SearchResult)[]): st
             task.isBlocked ? t.blocked.chalk('⊘ ') + t.title.chalk(task.title) : t.title.chalk(task.title),
             task.projectName ? colorizeProject(task.projectName, task.projectColor) : '',
             (task.tagNames || []).join(', '),
-            formatStatus(task.status),
+            formatStatus(task.status, defs),
         ];
         if (hasMatchInfo) {
             row.push(t.accent.chalk('_matchedIn' in task ? (task._matchedIn?.join(', ') || '') : ''));
@@ -154,7 +168,7 @@ export function formatTaskTable(tasks: (TaskWithRelations | SearchResult)[]): st
 }
 
 /** Format task detail view */
-export function formatTaskDetail(task: TaskWithRelations): string {
+export function formatTaskDetail(task: TaskWithRelations, defs?: StatusDef[]): string {
     const t = theme();
     const lines: string[] = [];
 
@@ -162,7 +176,7 @@ export function formatTaskDetail(task: TaskWithRelations): string {
     lines.push(t.title.chalk(`  ${task.title}`));
     lines.push(t.panelBorder.chalk('  ' + '─'.repeat(50)));
     lines.push('');
-    lines.push(`  ${t.subtitle.chalk('Status:')}     ${formatStatus(task.status)}`);
+    lines.push(`  ${t.subtitle.chalk('Status:')}     ${formatStatus(task.status, defs)}`);
     lines.push(`  ${t.subtitle.chalk('Priority:')}   ${formatPriorityLabel(task.priority)}`);
     lines.push(`  ${t.subtitle.chalk('Project:')}    ${task.projectName ? colorizeProject(task.projectName, task.projectColor) : t.muted.chalk('(none)')}`);
 

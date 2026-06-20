@@ -101,7 +101,7 @@ Examples:
                         title: mapped.title || issue.title,
                         description: mapped.description || issue.description || '',
                         priority: mapped.priority || 'medium',
-                        status: mapped.status || 'pending',
+                        status: mapped.status || 'todo',
                         jiraKey: jiraKey,
                         syncHash: (issue.metadata?.syncHash as string) || '',
                         lastSyncedAt: new Date().toISOString(),
@@ -145,7 +145,7 @@ jiraCommand
     .command('list')
     .alias('ls')
     .description('List locally synced Jira tasks')
-    .option('-S, --status <status>', 'Filter by local status: pending, in_progress, done')
+    .option('-S, --status <status>', 'Filter by local status: todo, in_progress, done')
     .addOption(new Option('-s, --status-deprecated <status>', 'Deprecated alias for --status; use -S').hideHelp(true))
     .option('-p, --priority <level>', 'Filter by priority: urgent, high, medium, low')
     .option('--project <key>', 'Filter by Jira project key prefix')
@@ -171,8 +171,11 @@ Examples:
             const ctx = getContext();
             const t = theme();
 
+            // Fetch defs once for status rendering and filtering
+            const statusDefs = ctx.statusRepo.list();
+            const defaultStatuses = statusDefs.filter(d => !d.archives).map(d => d.key);
             const allTasks = ctx.taskRepo.list({
-                status: opts.status ? opts.status : ['pending', 'in_progress', 'done'],
+                status: opts.status ? opts.status : defaultStatuses,
                 priority: opts.priority || undefined,
             });
 
@@ -213,7 +216,7 @@ Examples:
                     t.title.chalk(task.title.length > 28 ? task.title.substring(0, 25) + '...' : task.title),
                     t.muted.chalk(desc),
                     formatPriority(task.priority),
-                    formatStatus(task.status),
+                    formatStatus(task.status, statusDefs),
                     syncedAt,
                 ]);
             }
@@ -334,7 +337,7 @@ jiraCommand
             const isHealthy = await plugin.provider.healthCheck(credStore);
             const domain = await credStore.get('jira:domain');
 
-            const allTasks = ctx.taskRepo.list({ status: ['pending', 'in_progress', 'done', 'archived'] });
+            const allTasks = ctx.taskRepo.list({ includeArchived: true });
             const jiraTasks = allTasks.filter((tk) => tk.jiraKey);
 
             if (opts.json) {

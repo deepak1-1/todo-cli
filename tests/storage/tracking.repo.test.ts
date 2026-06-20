@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { up as initialMigration } from '../../src/storage/migrations/001-initial.js';
-import { up as trackingMigration } from '../../src/storage/migrations/002-time-tracking.js';
+import { createTestDb } from '../../src/storage/database.js';
+import { runMigrations } from '../../src/storage/migrations/runner.js';
 import { TrackingRepository } from '../../src/storage/repositories/tracking.repo.js';
 import { TaskRepository } from '../../src/storage/repositories/task.repo.js';
 import { todayLocal } from '../../src/utils/date.js';
@@ -25,12 +25,14 @@ function insertSession(
 }
 
 beforeEach(() => {
-    db = new Database(':memory:');
-    db.pragma('foreign_keys = ON');
-    initialMigration(db);
-    trackingMigration(db);
+    db = createTestDb();
+    runMigrations(db);
     taskRepo = new TaskRepository(db);
     trackingRepo = new TrackingRepository(db);
+});
+
+afterEach(() => {
+    db.close();
 });
 
 // ----------------------------------------------------------------

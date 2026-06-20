@@ -1,4 +1,4 @@
-// Tests for --json flag on mutating commands: add, delete, edit, start, done, qa, reopen, archive
+// Tests for --json flag on mutating commands: add, delete, edit, start, done, review, reopen, archive
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import type Database from 'better-sqlite3';
@@ -27,6 +27,8 @@ vi.mock('../../src/plugins/hook-manager.js', () => ({
 let db: Database.Database;
 let ctx: AppContext;
 
+import { StatusRepository } from '../../src/storage/repositories/status.repo.js';
+
 function buildCtx(database: Database.Database): AppContext {
     return {
         taskRepo: new TaskRepository(database),
@@ -36,6 +38,7 @@ function buildCtx(database: Database.Database): AppContext {
         actionLog: new ActionLogRepository(database),
         depRepo: new DependencyRepository(database),
         trackingRepo: new TrackingRepository(database),
+        statusRepo: new StatusRepository(database),
     };
 }
 
@@ -250,24 +253,39 @@ describe('edit command --json', () => {
         expect(payload.error.code).toBe(3);
     });
 
-    it('emits ok:false for invalid status value', async () => {
+    it('regression: edit rejects --status as unknown option', async () => {
+        // --status was removed from edit; it must be treated as unknown option
         const task = ctx.taskRepo.create({ title: 'Transition test' });
-        // "flying" is not a valid status — expect USAGE exit code
         const { editCommand } = await import('../../src/commands/edit.js');
-        const payload = captureJsonOutput<JsonError>(() => {
-            editCommand.parse([String(task.id), '--status', 'flying', '--json'], { from: 'user' });
-        });
-        expect(payload.ok).toBe(false);
-        expect(payload.error.code).toBe(2);
+        const originalExitCode = process.exitCode;
+        process.exitCode = 0;
+        let threw = false;
+        try {
+            editCommand.parse([String(task.id), '--status', 'done', '--json'], { from: 'user' });
+        } catch {
+            threw = true;
+        }
+        // Commander throws or sets exitCode on unknown options
+        const rejected = threw || (process.exitCode !== 0 && process.exitCode !== undefined);
+        process.exitCode = originalExitCode;
+        expect(rejected).toBe(true);
     });
 
-    it('includes recurring info in JSON payload for recurring task completion', async () => {
+    it('includes recurring info in JSON payload for recurring task completion via executeEdit', async () => {
         const task = ctx.taskRepo.create({ title: 'Recurring', recurrence: 'daily' });
         ctx.taskRepo.update(task.id, { status: 'in_progress' });
-        const { editCommand } = await import('../../src/commands/edit.js');
-        const payload = captureJsonOutput<JsonSuccess>(() => {
-            editCommand.parse([String(task.id), '--status', 'done', '--json'], { from: 'user' });
+        // Use executeEdit directly since --status flag is removed from editCommand
+        const { executeEdit } = await import('../../src/commands/edit.js');
+        let captured = '';
+        const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+            captured += chunk;
+            return true;
         });
+        vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        executeEdit(task.id, { status: 'done' }, { json: true });
+        spy.mockRestore();
+        vi.restoreAllMocks();
+        const payload = JSON.parse(captured.trim()) as JsonSuccess;
         expect(payload.ok).toBe(true);
         expect(payload.recurring).toBeDefined();
         expect(typeof payload.recurring?.id).toBe('number');
@@ -288,14 +306,14 @@ describe('edit command --json', () => {
 });
 
 // ──────────────────────────────────────────────
-// Status shortcut commands --json
+// Status verb commands --json (via executeEdit directly)
 // ──────────────────────────────────────────────
-describe('start --json', () => {
+describe('start (executeEdit to in_progress) --json', () => {
     it('emits ok:true JSON after transitioning to in_progress', async () => {
         const task = ctx.taskRepo.create({ title: 'Start me' });
-        const { startCommand } = await import('../../src/commands/status.js');
+        const { executeEdit } = await import('../../src/commands/edit.js');
         const payload = captureJsonOutput<JsonSuccess>(() => {
-            startCommand.parse([String(task.id), '--json'], { from: 'user' });
+            executeEdit(task.id, { status: 'in_progress' }, { json: true });
         });
         expect(payload.ok).toBe(true);
         expect(payload.command).toBe('edit');
@@ -304,22 +322,22 @@ describe('start --json', () => {
     });
 
     it('emits ok:false JSON when task not found', async () => {
-        const { startCommand } = await import('../../src/commands/status.js');
+        const { executeEdit } = await import('../../src/commands/edit.js');
         const payload = captureJsonOutput<JsonError>(() => {
-            startCommand.parse(['999999', '--json'], { from: 'user' });
+            executeEdit(999999, { status: 'in_progress' }, { json: true });
         });
         expect(payload.ok).toBe(false);
         expect(payload.error.code).toBe(3);
     });
 });
 
-describe('done --json', () => {
+describe('done (executeEdit to done) --json', () => {
     it('emits ok:true JSON after marking done', async () => {
         const task = ctx.taskRepo.create({ title: 'Do me' });
         ctx.taskRepo.update(task.id, { status: 'in_progress' });
-        const { doneCommand } = await import('../../src/commands/status.js');
+        const { executeEdit } = await import('../../src/commands/edit.js');
         const payload = captureJsonOutput<JsonSuccess>(() => {
-            doneCommand.parse([String(task.id), '--json'], { from: 'user' });
+            executeEdit(task.id, { status: 'done' }, { json: true });
         });
         expect(payload.ok).toBe(true);
         const data = payload.data as Record<string, unknown>;
@@ -327,41 +345,41 @@ describe('done --json', () => {
     });
 });
 
-describe('qa --json', () => {
-    it('emits ok:true JSON after moving to in_qa', async () => {
-        const task = ctx.taskRepo.create({ title: 'QA me' });
+describe('review (executeEdit to in_review) --json', () => {
+    it('emits ok:true JSON after moving to in_review', async () => {
+        const task = ctx.taskRepo.create({ title: 'Review me' });
         ctx.taskRepo.update(task.id, { status: 'in_progress' });
-        const { qaCommand } = await import('../../src/commands/status.js');
+        const { executeEdit } = await import('../../src/commands/edit.js');
         const payload = captureJsonOutput<JsonSuccess>(() => {
-            qaCommand.parse([String(task.id), '--json'], { from: 'user' });
+            executeEdit(task.id, { status: 'in_review' }, { json: true });
         });
         expect(payload.ok).toBe(true);
         const data = payload.data as Record<string, unknown>;
-        expect(data.status).toBe('in_qa');
+        expect(data.status).toBe('in_review');
     });
 });
 
-describe('reopen --json', () => {
+describe('reopen (executeEdit to todo) --json', () => {
     it('emits ok:true JSON after reopening a done task', async () => {
         const task = ctx.taskRepo.create({ title: 'Reopen me' });
         ctx.taskRepo.update(task.id, { status: 'done', completedAt: new Date().toISOString() });
-        const { reopenCommand } = await import('../../src/commands/status.js');
+        const { executeEdit } = await import('../../src/commands/edit.js');
         const payload = captureJsonOutput<JsonSuccess>(() => {
-            reopenCommand.parse([String(task.id), '--json'], { from: 'user' });
+            executeEdit(task.id, { status: 'todo' }, { json: true });
         });
         expect(payload.ok).toBe(true);
         const data = payload.data as Record<string, unknown>;
-        expect(data.status).toBe('pending');
+        expect(data.status).toBe('todo');
     });
 });
 
-describe('archive --json', () => {
+describe('archive (executeEdit to archived) --json', () => {
     it('emits ok:true JSON after archiving a done task', async () => {
         const task = ctx.taskRepo.create({ title: 'Archive me' });
         ctx.taskRepo.update(task.id, { status: 'done', completedAt: new Date().toISOString() });
-        const { archiveCommand } = await import('../../src/commands/status.js');
+        const { executeEdit } = await import('../../src/commands/edit.js');
         const payload = captureJsonOutput<JsonSuccess>(() => {
-            archiveCommand.parse([String(task.id), '--json'], { from: 'user' });
+            executeEdit(task.id, { status: 'archived' }, { json: true });
         });
         expect(payload.ok).toBe(true);
         const data = payload.data as Record<string, unknown>;

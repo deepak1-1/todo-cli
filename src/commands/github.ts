@@ -335,13 +335,16 @@ githubCommand
             issues, plugin, ctx.taskRepo, ctx.projectRepo, ctx.tagRepo,
         );
 
-        const allTasks = ctx.taskRepo.list({ status: ['done', 'in_progress'] });
+        // Push tasks with non-archived statuses; pass defs so terminal check is registry-driven
+        const statusDefs = ctx.statusRepo.list();
+        const syncStatuses = statusDefs.filter(d => !d.archives).map(d => d.key);
+        const allTasks = ctx.taskRepo.list({ status: syncStatuses });
         let pushed = 0;
 
         for (const task of allTasks) {
             if (!task.githubRef) continue;
 
-            const result = await plugin.provider.push(credStore, task, task.githubRef);
+            const result = await plugin.provider.push(credStore, task, task.githubRef, statusDefs);
             if (result.success && result.updatedFields.length > 0) {
                 pushed++;
             }

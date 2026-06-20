@@ -3,6 +3,7 @@
 // ============================================================
 
 import { Task, CreateTaskInput, TaskFilters, TaskStatus, Project, Tag } from '../core/types.js';
+import type { StatusDef } from '../core/status.js';
 
 // Plugin-safe subset of Task fields — excludes immutable identity and timestamp fields.
 export type SafeTaskUpdate = Partial<Pick<Task, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'dueDate' | 'jiraKey' | 'jiraId' | 'githubRef' | 'lastSyncedAt' | 'syncHash'>>;
@@ -87,7 +88,7 @@ export interface IntegrationProvider {
     auth(store: CredentialStore, prompt: PromptFn): Promise<void>;
     healthCheck(store: CredentialStore): Promise<boolean>;
     pull(store: CredentialStore, filters: PullFilters): Promise<ExternalTask[]>;
-    push(store: CredentialStore, task: Task, externalRef: string): Promise<PushResult>;
+    push(store: CredentialStore, task: Task, externalRef: string, statusDefs?: StatusDef[]): Promise<PushResult>;
     mapToLocal(external: ExternalTask): Partial<CreateTaskInput> & { status?: TaskStatus };
     mapToRemote(task: Task): Record<string, unknown>;
 

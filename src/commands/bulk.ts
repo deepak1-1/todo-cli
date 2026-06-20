@@ -11,7 +11,8 @@ import { addFilterOptions, filterAndSearchTasks, hasAnyFilter } from '../utils/f
 import { fail, EXIT } from '../utils/exit.js';
 import { emitJson } from '../utils/json-output.js';
 import { normalizePriority, PRIORITY_ERROR } from '../core/types.js';
-import type { Task, TaskStatus, EditOptions } from '../core/types.js';
+import type { Task, EditOptions } from '../core/types.js';
+import type { StatusDef } from '../core/status.js';
 
 async function confirm(message: string): Promise<boolean> {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -36,7 +37,6 @@ function resolveMatchingTasks(opts: Record<string, unknown>, command?: string): 
         const result = filterAndSearchTasks(ctx, opts);
         tasks = result.tasks;
     } catch (e: unknown) {
-        // parseIntOption throws on invalid --limit values
         fail(EXIT.USAGE, e instanceof Error ? e.message : String(e), { json, command });
         return null;
     }
@@ -57,22 +57,21 @@ async function previewAndConfirm(tasks: Task[], actionLabel: string, yes: boolea
     return confirm('  Continue?');
 }
 
-function makeStatusAction(targetStatus: TaskStatus, label: string, command: string) {
+function makeStatusAction(targetStatusKey: string, label: string, command: string) {
     return async (opts: Record<string, unknown>) => {
         const json = !!opts.json;
         const tasks = resolveMatchingTasks(opts, command);
         if (!tasks) return;
-        // --json implies --yes (no interactive prompt with JSON stdout)
         if (!json && !(await previewAndConfirm(tasks, `marked as ${label}`, !!opts.yes))) return;
 
         let count = 0;
         const taskIds: number[] = [];
         for (const task of tasks) {
-            executeEdit(task.id, { status: targetStatus }, { silent: true });
+            executeEdit(task.id, { status: targetStatusKey }, { silent: true });
             count++;
             taskIds.push(task.id);
         }
-        if (json) emitJson({ ok: true, command, data: { updated: count, taskIds, status: targetStatus } });
+        if (json) emitJson({ ok: true, command, data: { updated: count, taskIds, status: targetStatusKey } });
         else console.log(success(`${count} task${count !== 1 ? 's' : ''} marked as ${label}`));
     };
 }
@@ -91,20 +90,14 @@ Examples:
   $ todo bulk done --priority high --tag backend --yes
   $ todo bulk done --status in_progress --project "My App" --yes`;
 
-const doneCmd = new Command('done').description('Mark matching tasks as done');
-addSharedOptions(doneCmd).addHelpText('after', sharedFilterExample).action(makeStatusAction('done', 'done', 'bulk done'));
-
-const startCmd = new Command('start').description('Start matching tasks');
-addSharedOptions(startCmd).addHelpText('after', sharedFilterExample).action(makeStatusAction('in_progress', 'in progress', 'bulk start'));
-
-const qaCmd = new Command('qa').description('Move matching tasks to QA');
-addSharedOptions(qaCmd).addHelpText('after', sharedFilterExample).action(makeStatusAction('in_qa', 'in QA', 'bulk qa'));
-
-const archiveCmd = new Command('archive').description('Archive matching tasks');
-addSharedOptions(archiveCmd).addHelpText('after', sharedFilterExample).action(makeStatusAction('archived', 'archived', 'bulk archive'));
-
-const reopenCmd = new Command('reopen').description('Reopen matching tasks');
-addSharedOptions(reopenCmd).addHelpText('after', sharedFilterExample).action(makeStatusAction('pending', 'reopened', 'bulk reopen'));
+/** Build bulk status subcommands from pre-loaded registry defs (no DB access here). */
+export function buildBulkStatusCommands(defs: StatusDef[]): Command[] {
+    return defs.map(d => {
+        const cmd = new Command(d.verb).description(`Mark matching tasks as ${d.label}`);
+        addSharedOptions(cmd).addHelpText('after', sharedFilterExample).action(makeStatusAction(d.key, d.label, `bulk ${d.verb}`));
+        return cmd;
+    });
+}
 
 const deleteCmd = new Command('delete').description('Delete matching tasks');
 addSharedOptions(deleteCmd)
@@ -117,6 +110,7 @@ addSharedOptions(deleteCmd)
         if (!json && !(await previewAndConfirm(tasks, actionLabel, !!opts.yes))) return;
 
         const ctx = getContext();
+        const archiveKey = ctx.statusRepo.list().find(d => d.archives)?.key ?? 'archived';
         const taskIds: number[] = [];
         for (const task of tasks) {
             if (opts.force) {
@@ -126,7 +120,7 @@ addSharedOptions(deleteCmd)
             } else {
                 ctx.taskRepo.archive(task.id);
                 getHookManager().onTaskDelete(task).catch((e) => logWarn(`Hook error: ${e instanceof Error ? e.message : String(e)}`));
-                ctx.actionLog.log({ taskId: task.id, action: 'archive', entityType: 'task', prevState: JSON.stringify({ status: task.status }), newState: JSON.stringify({ status: 'archived' }) });
+                ctx.actionLog.log({ taskId: task.id, action: 'archive', entityType: 'task', prevState: JSON.stringify({ status: task.status }), newState: JSON.stringify({ status: archiveKey }) });
             }
             taskIds.push(task.id);
         }
@@ -136,11 +130,9 @@ addSharedOptions(deleteCmd)
 
 const editCmd = new Command('edit').description('Edit fields on matching tasks');
 addSharedOptions(editCmd)
-    // --set-* forms are explicit edit flags; bare filter flags (priority/status/project) serve as fallback aliases
     .option('--set-priority <level>', 'Set priority (takes precedence over --priority when both given)')
     .option('--set-project <name>', 'Set project (takes precedence over --project when both given)')
     .option('--set-due <date>', 'Set due date (natural language, e.g. "next friday")')
-    .option('--set-status <status>', 'Set status (takes precedence over --status when both given)')
     .option('--clear-due', 'Remove due date')
     .option('--clear-project', 'Remove from project')
     .addHelpText('after', `
@@ -149,7 +141,7 @@ Examples:
   $ todo bulk edit --tag backend --set-priority high --yes
   $ todo bulk edit --project "My App" --set-due "next friday" --yes
 
-  --priority/--status/--project are dual-role on 'bulk edit': they FILTER selection AND
+  --priority/--project are dual-role on 'bulk edit': they FILTER selection AND
   (when no --set-* is given) act as the edit target. To change priority on a set filtered
   by something else (e.g. --tag), use --set-priority. --set-due is the only way to edit due.`)
     .action(async (opts) => {
@@ -160,7 +152,6 @@ Examples:
         const resolvedPriority = (opts.setPriority as string | undefined) ?? (opts.priority as string | undefined);
         const resolvedProject = (opts.setProject as string | undefined) ?? (opts.project as string | undefined);
         const resolvedDue = opts.setDue as string | undefined;
-        const resolvedStatus = (opts.setStatus as string | undefined) ?? (opts.status as string | undefined);
 
         if (resolvedPriority && normalizePriority(resolvedPriority) === null) {
             return fail(EXIT.USAGE, PRIORITY_ERROR, { json, command: 'bulk edit' });
@@ -170,13 +161,12 @@ Examples:
         if (resolvedPriority) editOpts.priority = resolvedPriority;
         if (resolvedProject) editOpts.project = resolvedProject;
         if (resolvedDue) editOpts.due = resolvedDue;
-        if (resolvedStatus) editOpts.status = resolvedStatus;
         if (opts.clearDue) editOpts.due = false;
         if (opts.clearProject) editOpts.project = false;
 
         const fields = Object.keys(editOpts);
         if (fields.length === 0) {
-            return fail(EXIT.USAGE, 'Provide at least one edit flag (--due, --priority, --status, --project, --set-*, --clear-*)', { json, command: 'bulk edit' });
+            return fail(EXIT.USAGE, 'Provide at least one edit flag (--due, --priority, --project, --set-*, --clear-*)', { json, command: 'bulk edit' });
         }
 
         if (!json && !(await previewAndConfirm(tasks, `updated (${fields.join(', ')})`, !!opts.yes))) return;
@@ -239,11 +229,7 @@ tagCmd.addCommand(tagRemoveCmd);
 export const bulkCommand = new Command('bulk')
     .description('Bulk operations on filtered task sets');
 
-bulkCommand.addCommand(doneCmd);
-bulkCommand.addCommand(startCmd);
-bulkCommand.addCommand(qaCmd);
-bulkCommand.addCommand(archiveCmd);
-bulkCommand.addCommand(reopenCmd);
+// Status subcommands are registered lazily from index.ts via buildBulkStatusCommands(defs).
 bulkCommand.addCommand(deleteCmd);
 bulkCommand.addCommand(editCmd);
 bulkCommand.addCommand(tagCmd);

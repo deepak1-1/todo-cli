@@ -10,6 +10,7 @@ import { formatDuration } from '../core/timer.js';
 import { formatLocalDateTime } from '../utils/date.js';
 import { requireEntity } from '../utils/exit.js';
 import { emitJson } from '../utils/json-output.js';
+import { isComplete } from '../core/status.js';
 
 export const showCommand = new Command('show')
     .description('Show full details of a task')
@@ -34,17 +35,18 @@ export const showCommand = new Command('show')
             return;
         }
 
-        console.log(formatTaskDetail(task));
+        console.log(formatTaskDetail(task, ctx.statusRepo.list()));
 
         const t = theme();
         // Show dependencies
         if (deps.length > 0) {
+            const defs = ctx.statusRepo.list();
             console.log(t.panelBorder.chalk('  ── Dependencies ─────────────────────────'));
             for (const depId of deps) {
                 const dep = ctx.taskRepo.getById(depId);
                 if (dep) {
-                    const status = dep.status === 'done' ? '✓' : '○';
-                    console.log(t.body.chalk(`    ${status} #${dep.id} ${dep.title} (${dep.status})`));
+                    const statusIcon = isComplete(defs, dep.status) ? '✓' : '○';
+                    console.log(t.body.chalk(`    ${statusIcon} #${dep.id} ${dep.title} (${dep.status})`));
                 }
             }
             console.log('');

@@ -31,12 +31,14 @@ export function applyDelete(ctx: AppContext, id: number, opts?: { force?: boolea
     } else {
         ctx.taskRepo.archive(id);
         getHookManager().onTaskDelete(task).catch((e) => logWarn(`Hook error: ${e instanceof Error ? e.message : String(e)}`));
+        // Retrieve archive status key from registry for the action log
+        const archiveKey = ctx.statusRepo.list().find(d => d.archives)?.key ?? 'archived';
         ctx.actionLog.log({
             taskId: id,
             action: 'archive',
             entityType: 'task',
             prevState: JSON.stringify({ status: task.status }),
-            newState: JSON.stringify({ status: 'archived' }),
+            newState: JSON.stringify({ status: archiveKey }),
         });
     }
 
@@ -83,7 +85,8 @@ export const deleteCommand = new Command('rm')
             }
         } else {
             if (jsonMode) {
-                emitJson({ ok: true, command: 'delete', data: { ...deleted, status: 'archived' } });
+                const archiveKey = ctx.statusRepo.list().find(d => d.archives)?.key ?? 'archived';
+                emitJson({ ok: true, command: 'delete', data: { ...deleted, status: archiveKey } });
             } else {
                 console.log(success(`Archived task ${theme().heading.chalk('#' + id)}: ${deleted.title}`));
             }

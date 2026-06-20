@@ -13,6 +13,7 @@ import { DependencyRepository } from '../../src/storage/repositories/dependency.
 import { TrackingRepository } from '../../src/storage/repositories/tracking.repo.js';
 import { diffSeconds, parseSqliteUtc } from '../../src/utils/date.js';
 import type { AppContext } from '../../src/commands/context.js';
+import { StatusRepository } from '../../src/storage/repositories/status.repo.js';
 
 // Mock hook manager to suppress async side-effects
 vi.mock('../../src/plugins/hook-manager.js', () => ({
@@ -46,6 +47,7 @@ function buildCtx(database: Database.Database): AppContext {
         actionLog: new ActionLogRepository(database),
         depRepo: new DependencyRepository(database),
         trackingRepo: new TrackingRepository(database),
+        statusRepo: new StatusRepository(database),
     };
 }
 
@@ -104,10 +106,10 @@ describe('timer start', () => {
         expect(session?.startedAt).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
     });
 
-    it('auto-transitions a pending task to in_progress', async () => {
+    it('auto-transitions a todo task to in_progress', async () => {
         const restore = silenceConsole();
         const task = ctx.taskRepo.create({ title: 'Pending task', priority: 'medium' });
-        expect(task.status).toBe('pending');
+        expect(task.status).toBe('todo');
 
         const { timerCommand } = await import('../../src/commands/timer.js');
         await timerCommand.parseAsync(['start', String(task.id)], { from: 'user' });

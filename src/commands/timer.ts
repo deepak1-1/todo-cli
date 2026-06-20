@@ -62,9 +62,12 @@ export const timerCommand = new Command('timer')
                         console.log(t.muted.chalk(`  Run "todo timer stop" when done`));
                     }
 
-                    if (task.status === 'pending') {
-                        ctx.taskRepo.update(id, { status: 'in_progress' });
-                        console.log(t.statusInProgress.chalk(`  Task status → in progress`));
+                    // Auto-advance status to the 'start' verb's target key
+                    const startDef = ctx.statusRepo.list().find(d => d.verb === 'start');
+                    const todoKey = ctx.statusRepo.list().find(d => d.verb === 'reopen')?.key ?? 'todo';
+                    if (startDef && task.status === todoKey) {
+                        ctx.taskRepo.update(id, { status: startDef.key });
+                        console.log(t.statusInProgress.chalk(`  Task status → ${startDef.label}`));
                     }
                 } catch (err: unknown) {
                     const msg = err instanceof Error ? err.message : String(err);

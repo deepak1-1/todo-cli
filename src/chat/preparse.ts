@@ -53,14 +53,23 @@ export function preparse(input: string): Intent | null {
     const timeAdjust = parseTimeAdjust(lower);
     if (timeAdjust) return timeAdjust;
 
-    // Status updates with task ID
+    // Status updates with task ID — use verb-to-key mapping (registry-aligned)
+    const VERB_TO_KEY: Record<string, string> = {
+        done: 'done', complete: 'done', finish: 'done',
+        start: 'in_progress', begin: 'in_progress',
+        review: 'in_review', qa: 'in_review',
+        archive: 'archived',
+        reopen: 'todo', 're-open': 'todo',
+        block: 'blocked',
+    };
     const id = extractTaskId(lower);
     if (id) {
-        if (/\b(done|complete|finish)\b/.test(lower)) return { action: 'update_status', taskId: id, status: 'done' };
-        if (/\b(start|begin)\b/.test(lower)) return { action: 'update_status', taskId: id, status: 'in_progress' };
-        if (/\breview\b/.test(lower) || /\bqa\b/.test(lower)) return { action: 'update_status', taskId: id, status: 'in_qa' };
-        if (/\b(archive)\b/.test(lower)) return { action: 'update_status', taskId: id, status: 'archived' };
-        if (/\b(reopen|re-open)\b/.test(lower)) return { action: 'update_status', taskId: id, status: 'pending' };
+        if (/\b(done|complete|finish)\b/.test(lower)) return { action: 'update_status', taskId: id, status: VERB_TO_KEY.done };
+        if (/\b(start|begin)\b/.test(lower) && !/\bstart\s*timer\b/.test(lower) && !/\btimer\s*start\b/.test(lower)) return { action: 'update_status', taskId: id, status: VERB_TO_KEY.start };
+        if (/\breview\b/.test(lower) || /\bqa\b/.test(lower)) return { action: 'update_status', taskId: id, status: VERB_TO_KEY.review };
+        if (/\b(archive)\b/.test(lower)) return { action: 'update_status', taskId: id, status: VERB_TO_KEY.archive };
+        if (/\b(reopen|re-open)\b/.test(lower)) return { action: 'update_status', taskId: id, status: VERB_TO_KEY.reopen };
+        if (/\b(block)\b/.test(lower)) return { action: 'update_status', taskId: id, status: VERB_TO_KEY.block };
         if (/\b(delete|remove|rm)\b/.test(lower)) return { action: 'delete_task', taskId: id };
         if (/\b(show|detail|view|info)\b/.test(lower)) return { action: 'show_detail', taskId: id };
         if (/\bstart\s*timer\b/.test(lower) || /\btimer\s*start\b/.test(lower)) return { action: 'start_timer', taskId: id };

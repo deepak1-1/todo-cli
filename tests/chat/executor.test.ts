@@ -10,6 +10,7 @@ import { TimerRepository } from '../../src/storage/repositories/timer.repo.js';
 import { ActionLogRepository } from '../../src/storage/repositories/action-log.repo.js';
 import { DependencyRepository } from '../../src/storage/repositories/dependency.repo.js';
 import { TrackingRepository } from '../../src/storage/repositories/tracking.repo.js';
+import { StatusRepository } from '../../src/storage/repositories/status.repo.js';
 import { IntentExecutor } from '../../src/chat/executor.js';
 import type { AppContext } from '../../src/commands/context.js';
 import type { Intent } from '../../src/chat/intent.js';
@@ -76,6 +77,7 @@ function buildCtx(): AppContext {
         actionLog: new ActionLogRepository(db),
         depRepo: new DependencyRepository(db),
         trackingRepo: new TrackingRepository(db),
+        statusRepo: new StatusRepository(db),
     };
 }
 
@@ -156,7 +158,7 @@ describe('IntentExecutor — invalid transition returns clarify message', () => 
         const task = ctx.taskRepo.create({ title: 'transition test' });
         const executor = new IntentExecutor(ctx);
 
-        // 'bogus_status' is not a valid TaskStatus — validateTransition should throw
+        // 'bogus_status' is not a valid status key — applyEdit ignores unknown keys
         const result = await executor.execute({
             action: 'update_status',
             taskId: task.id,
@@ -165,7 +167,9 @@ describe('IntentExecutor — invalid transition returns clarify message', () => 
 
         // Must return a message — must not throw, must not exit
         expect(result.message).toBeTruthy();
-        expect(result.message).toContain('bogus_status');
+        // Status remains unchanged since bogus_status is silently ignored
+        const t = ctx.taskRepo.getById(task.id);
+        expect(t?.status).toBe('todo');
     });
 
     it('does not throw when task not found on update_status', async () => {

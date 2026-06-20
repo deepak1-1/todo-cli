@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
-import { intentSchema, validateIntent, type Intent } from './intent.js';
+import { buildIntentSchema, validateIntent, type Intent } from './intent.js';
 import { buildSystemPrompt, type TaskSummary } from './prompt.js';
 import { getDb } from '../storage/database.js';
 import { debug } from '../utils/logger.js';
@@ -24,7 +24,7 @@ CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL, description T
 
 CREATE TABLE tasks (
   id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT,
-  status TEXT NOT NULL DEFAULT 'pending',   -- pending, in_progress, in_qa, done, archived
+  status TEXT NOT NULL DEFAULT 'todo',   -- key from statuses table (builtin: todo, in_progress, in_review, blocked, done, archived; user-defined keys also valid)
   priority TEXT NOT NULL DEFAULT 'medium',  -- urgent, high, medium, low
   project_id INTEGER REFERENCES projects(id),
   due_date TEXT,              -- ISO date e.g. '2025-03-15'
@@ -57,7 +57,7 @@ Q: Show time spent per project in hours
 SQL: SELECT p.name AS project, ROUND(SUM(t.time_spent)/3600.0, 1) AS hours FROM tasks t JOIN projects p ON t.project_id = p.id WHERE t.time_spent > 0 GROUP BY p.id ORDER BY hours DESC
 
 Q: Which tasks are overdue?
-SQL: SELECT t.id, t.title, t.due_date, t.priority, p.name AS project FROM tasks t LEFT JOIN projects p ON t.project_id = p.id WHERE t.due_date < date('now') AND t.status NOT IN ('done','archived') ORDER BY t.due_date
+SQL: SELECT t.id, t.title, t.due_date, t.priority, p.name AS project FROM tasks t LEFT JOIN projects p ON t.project_id = p.id WHERE t.due_date < date('now') AND t.status NOT IN (SELECT key FROM statuses WHERE archives = 1 OR completes = 1) ORDER BY t.due_date
 
 Q: How many days did I work more than 8 hours?
 SQL: SELECT date(started_at) AS day, ROUND(SUM(duration)/3600.0, 1) AS hours FROM time_tracking GROUP BY day HAVING SUM(duration) > 28800 ORDER BY day
@@ -94,7 +94,7 @@ export class ModelManager {
         }
     }
 
-    async ensureAndLoad(taskSummary?: TaskSummary): Promise<void> {
+    async ensureAndLoad(taskSummary?: TaskSummary, statusKeys?: string[]): Promise<void> {
         this.systemPrompt = buildSystemPrompt(taskSummary);
 
         // Try Claude CLI first
@@ -105,10 +105,10 @@ export class ModelManager {
         }
 
         // Fall back to local model
-        await this.loadLocalModel(taskSummary);
+        await this.loadLocalModel(taskSummary, statusKeys);
     }
 
-    private async loadLocalModel(_taskSummary?: TaskSummary): Promise<void> {
+    private async loadLocalModel(_taskSummary?: TaskSummary, statusKeys?: string[]): Promise<void> {
         const nlc = await import('node-llama-cpp');
 
         // Try to find existing model on system
@@ -140,7 +140,9 @@ export class ModelManager {
             systemPrompt: this.systemPrompt,
         });
 
-        const grammar = await llama.createGrammarForJsonSchema(intentSchema);
+        // Build schema from live status keys so custom statuses are reachable by the grammar
+        const liveSchema = buildIntentSchema(statusKeys ?? []);
+        const grammar = await llama.createGrammarForJsonSchema(liveSchema);
 
         this.model = model;
         this.context = context;

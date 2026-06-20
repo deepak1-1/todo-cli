@@ -63,7 +63,8 @@ export class DependencyRepository {
             SELECT EXISTS(
                 SELECT 1 FROM dependencies d
                 JOIN tasks t ON d.depends_on_id = t.id
-                WHERE d.task_id = ? AND t.status NOT IN ('done', 'archived')
+                WHERE d.task_id = ?
+                  AND t.status NOT IN (SELECT key FROM statuses WHERE completes = 1 OR archives = 1)
             ) as blocked
         `).get(taskId) as { blocked: number };
         return row.blocked === 1;

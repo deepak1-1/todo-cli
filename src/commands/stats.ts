@@ -5,7 +5,7 @@ import { getContext } from './context.js';
 import { makeTable } from '../utils/table.js';
 import { formatDuration } from '../core/timer.js';
 import { PRIORITY_ORDER } from '../core/types.js';
-import type { TaskFilters, TaskStatus } from '../core/types.js';
+import type { TaskFilters } from '../core/types.js';
 import { fuzzySearch } from '../core/filter.js';
 import { parseRelativeDuration, formatDateDisplay, todayLocal, toLocalDateString } from '../utils/date.js';
 import { priorityChalkFn, statusChalkFn } from '../utils/format.js';
@@ -13,13 +13,7 @@ import { theme } from '../utils/theme.js';
 import { fail, EXIT } from '../utils/exit.js';
 import { emptyStateMessage } from '../utils/empty-state.js';
 
-const STATUS_LABELS: Record<TaskStatus, string> = {
-    pending: 'Pending',
-    in_progress: 'In Progress',
-    in_qa: 'In QA',
-    done: 'Done',
-    archived: 'Archived',
-};
+// Status labels are loaded dynamically from the registry
 
 export function formatLastLabel(duration: string): string {
     const match = duration.match(/^(\d+)(d|m|y)$/i);
@@ -72,9 +66,7 @@ export const statsCommand = new Command('stats')
     .option('-l, --last <duration>', 'Relative range: e.g. 7d, 3m, 1y')
     .option('--from <date>', 'Start date (YYYY-MM-DD)')
     .option('--to <date>', 'End date (YYYY-MM-DD)')
-    .option('--done', 'Show only done tasks')
-    .option('--in-progress', 'Show only in-progress tasks')
-    .option('--pending', 'Show only pending tasks')
+    .option('-S, --status <key>', 'Filter by status key')
     .option('-P, --project <name>', 'Filter by project')
     .option('-t, --tag <tags...>', 'Filter by tag')
     .option('-s, --search <query>', 'Fuzzy search tasks')
@@ -95,10 +87,8 @@ Examples:
             return fail(EXIT.USAGE, e instanceof Error ? e.message : String(e));
         }
 
-        const statuses: TaskStatus[] = [];
-        if (opts.done) statuses.push('done');
-        if (opts.inProgress) statuses.push('in_progress');
-        if (opts.pending) statuses.push('pending');
+        const statuses: string[] = [];
+        if (opts.status) statuses.push(opts.status as string);
 
         const workedTaskIds = ctx.trackingRepo.getTaskIdsWorkedInRange(from, to);
 
@@ -140,12 +130,14 @@ Examples:
         const workedDatesMap = ctx.trackingRepo.getWorkedDates(taskIds, from, to);
         const timeInRangeMap = ctx.trackingRepo.getTimeSpentInRange(taskIds, from, to);
 
+        const defs = ctx.statusRepo.list();
+        const statusCounts: Record<string, number> = {};
+        for (const tk of tasks) {
+            statusCounts[tk.status] = (statusCounts[tk.status] || 0) + 1;
+        }
         const summary = {
             total: tasks.length,
-            pending: tasks.filter(tk => tk.status === 'pending').length,
-            in_progress: tasks.filter(tk => tk.status === 'in_progress').length,
-            done: tasks.filter(tk => tk.status === 'done').length,
-            archived: tasks.filter(tk => tk.status === 'archived').length,
+            ...statusCounts,
             totalTimeSpent: taskIds.reduce((sum, id) => sum + (timeInRangeMap.get(id) || 0), 0),
         };
 
@@ -171,17 +163,18 @@ Examples:
         });
 
         for (const tk of tasks) {
-            const statusColor = statusChalkFn(tk.status);
+            const statusColor = statusChalkFn(tk.status, defs);
             const priorityColor = priorityChalkFn(tk.priority);
             const createdDate = tk.createdAt ? formatDateDisplay(tk.createdAt) : '-';
             const workedDates = (workedDatesMap.get(tk.id) || []).map(d => formatDateDisplay(d));
             const workedOn = workedDates.length > 0 ? workedDates.join(', ') : t.muted.chalk('-');
+            const statusLabel = defs.find(d => d.key === tk.status)?.label ?? tk.status;
 
             table.push([
                 t.id.chalk(`#${tk.id}`),
                 tk.jiraKey ? t.ref.chalk(tk.jiraKey) : tk.githubRef ? t.ref.chalk('#' + tk.githubRef.replace(/^.*#/, '')) : '',
                 t.title.chalk(tk.title),
-                statusColor(STATUS_LABELS[tk.status] || tk.status),
+                statusColor(statusLabel),
                 priorityColor(tk.priority),
                 tk.projectName || t.muted.chalk('-'),
                 t.muted.chalk(createdDate),
@@ -195,10 +188,12 @@ Examples:
         console.log(`\n  ${t.heading.chalk('Summary')}`);
         console.log(t.muted.chalk('  ─────────────────────────────────────────'));
         console.log(`  ${t.subtitle.chalk('Total tasks:')}     ${summary.total}`);
-        if (summary.pending > 0) console.log(`  ${t.subtitle.chalk('Pending:')}         ${t.statusPending.chalk(String(summary.pending))}`);
-        if (summary.in_progress > 0) console.log(`  ${t.subtitle.chalk('In Progress:')}     ${t.statusInProgress.chalk(String(summary.in_progress))}`);
-        if (summary.done > 0) console.log(`  ${t.subtitle.chalk('Done:')}            ${t.statusDone.chalk(String(summary.done))}`);
-        if (summary.archived > 0) console.log(`  ${t.subtitle.chalk('Archived:')}        ${t.statusArchived.chalk(String(summary.archived))}`);
+        for (const def of defs) {
+            const count = statusCounts[def.key] || 0;
+            if (count > 0) {
+                console.log(`  ${t.subtitle.chalk(def.label + ':')}`.padEnd(30) + statusChalkFn(def.key, defs)(String(count)));
+            }
+        }
         console.log(`  ${t.subtitle.chalk('Time spent:')}    ${summary.totalTimeSpent > 0 ? formatDuration(summary.totalTimeSpent) : t.muted.chalk('none')}`);
         console.log('');
     });

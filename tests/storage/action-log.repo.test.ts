@@ -1,18 +1,20 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { up as migration001 } from '../../src/storage/migrations/001-initial.js';
-import { up as migration002 } from '../../src/storage/migrations/002-time-tracking.js';
+import { createTestDb } from '../../src/storage/database.js';
+import { runMigrations } from '../../src/storage/migrations/runner.js';
 import { ActionLogRepository } from '../../src/storage/repositories/action-log.repo.js';
 
 let db: Database.Database;
 let actionLogRepo: ActionLogRepository;
 
 beforeEach(() => {
-    db = new Database(':memory:');
-    db.pragma('foreign_keys = ON');
-    migration001(db);
-    migration002(db);
+    db = createTestDb();
+    runMigrations(db);
     actionLogRepo = new ActionLogRepository(db);
+});
+
+afterEach(() => {
+    db.close();
 });
 
 describe('ActionLogRepository', () => {

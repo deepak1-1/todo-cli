@@ -3,6 +3,8 @@
 // ============================================================
 
 import { Task, CreateTaskInput, TaskPriority, TASK_PRIORITIES } from '../../core/types.js';
+import { isComplete, isArchived } from '../../core/status.js';
+import type { StatusDef } from '../../core/status.js';
 import {
     IntegrationProvider,
     CredentialStore,
@@ -138,7 +140,7 @@ const githubProvider: IntegrationProvider = {
         return tasks;
     },
 
-    async push(_store: CredentialStore, task: Task, externalRef: string): Promise<PushResult> {
+    async push(_store: CredentialStore, task: Task, externalRef: string, statusDefs?: StatusDef[]): Promise<PushResult> {
         const client = new GitHubClient(logger);
 
         try {
@@ -151,11 +153,15 @@ const githubProvider: IntegrationProvider = {
 
             const updatedFields: string[] = [];
 
-            if (task.status === 'done' || task.status === 'archived') {
+            // Use registry defs if provided, else fall back to key checks
+            const isTerminal = statusDefs
+                ? (isComplete(statusDefs, task.status) || isArchived(statusDefs, task.status))
+                : (task.status === 'done' || task.status === 'archived');
+
+            if (isTerminal) {
                 await client.updateIssue(owner, repo, number, { state: 'closed' });
                 updatedFields.push('state');
             } else {
-                // Any non-terminal status reopens the issue
                 await client.updateIssue(owner, repo, number, { state: 'open' });
                 updatedFields.push('state');
             }

@@ -11,6 +11,7 @@ import { theme, loadTheme, disableColors } from './utils/theme.js';
 import { getConfig } from './config/manager.js';
 import { CredentialFileCorruptError } from './plugins/credential-store.js';
 import { EXIT } from './utils/exit.js';
+import { debug } from './utils/logger.js';
 
 // Commands
 import { addCommand } from './commands/add.js';
@@ -19,7 +20,7 @@ import { showCommand } from './commands/show.js';
 import { editCommand } from './commands/edit.js';
 import { deleteCommand } from './commands/delete.js';
 import { bulkCommand } from './commands/bulk.js';
-import { startCommand, doneCommand, archiveCommand, qaCommand, reopenCommand } from './commands/status.js';
+import { statusCommand } from './commands/status.js';
 import { projectCommand } from './commands/project.js';
 import { tagCommand } from './commands/tag.js';
 import { statsCommand } from './commands/stats.js';
@@ -71,12 +72,8 @@ program.addCommand(editCommand);
 program.addCommand(deleteCommand);
 program.addCommand(bulkCommand);
 
-// Status transitions
-program.addCommand(startCommand);
-program.addCommand(doneCommand);
-program.addCommand(archiveCommand);
-program.addCommand(qaCommand);
-program.addCommand(reopenCommand);
+// Status management
+program.addCommand(statusCommand);
 
 // Organizational
 program.addCommand(projectCommand);
@@ -108,6 +105,33 @@ program
         const { startChat } = await import('./chat/index.js');
         await startChat();
     });
+
+// Skip the DB only for version output and the bare chat launch. --help/-h loads
+// the registry so dynamic verb commands are listed in the top-level help.
+const firstArg = process.argv[2];
+const skipDynamic = !firstArg || firstArg === '--version' || firstArg === '-V';
+
+if (!skipDynamic) {
+    // Dynamically register verb commands and bulk status subcommands from the status registry.
+    try {
+        const { getContext } = await import('./commands/context.js');
+        const { buildStatusCommands } = await import('./commands/status-commands.js');
+        const { buildBulkStatusCommands } = await import('./commands/bulk.js');
+        const ctx = getContext();
+        const defs = ctx.statusRepo.list();
+        const existingVerbs = new Set(program.commands.map(c => c.name()));
+        const statusVerbs = buildStatusCommands(defs, existingVerbs);
+        for (const cmd of statusVerbs) {
+            program.addCommand(cmd);
+        }
+        for (const cmd of buildBulkStatusCommands(defs)) {
+            bulkCommand.addCommand(cmd);
+        }
+    } catch (err: unknown) {
+        // DB unavailable — skip dynamic commands; help still works without them
+        debug('index.dynamic_commands', err instanceof Error ? err.message : String(err));
+    }
+}
 
 // Default action (no subcommand) — Launch AI chat mode.
 program.action(async () => {

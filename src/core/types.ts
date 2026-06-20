@@ -2,32 +2,12 @@
 // Core type definitions for Todo CLI
 // ============================================================
 
-export type TaskStatus = 'pending' | 'in_progress' | 'in_qa' | 'done' | 'archived';
+export type TaskStatus = string;
 export type TaskPriority = 'urgent' | 'high' | 'medium' | 'low';
 export type RecurrencePattern = 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'yearly';
 
-export const TASK_STATUSES: TaskStatus[] = ['pending', 'in_progress', 'in_qa', 'done', 'archived'];
 export const TASK_PRIORITIES: TaskPriority[] = ['urgent', 'high', 'medium', 'low'];
 export const VALID_RECURRENCES: RecurrencePattern[] = ['daily', 'weekly', 'biweekly', 'monthly', 'yearly'];
-
-const STATUS_ALIASES: Record<string, TaskStatus> = {
-    qa: 'in_qa',
-    review: 'in_qa',
-    wip: 'in_progress',
-    progress: 'in_progress',
-    archive: 'archived',
-};
-
-export function normalizeStatus(input: string): TaskStatus {
-    const normalized = input.toLowerCase().replace(/[\s-]/g, '_');
-    if (TASK_STATUSES.includes(normalized as TaskStatus)) {
-        return normalized as TaskStatus;
-    }
-    if (STATUS_ALIASES[normalized]) {
-        return STATUS_ALIASES[normalized];
-    }
-    throw new Error(`Invalid status "${input}". Valid statuses: ${TASK_STATUSES.join(', ')}`);
-}
 
 export const PRIORITY_ERROR = `Invalid priority. Use one of: ${TASK_PRIORITIES.join(', ')}`;
 

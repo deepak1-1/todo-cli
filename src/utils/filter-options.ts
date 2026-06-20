@@ -1,10 +1,10 @@
 // Shared filter option definitions and task-fetch pipeline for ls and bulk commands
 import { Command } from 'commander';
 import type { TaskFilters, TaskPriority, TaskSort, TaskWithRelations } from '../core/types.js';
-import { normalizeStatus } from '../core/types.js';
 import { fuzzySearch } from '../core/filter.js';
 import { parseIntOption } from './format.js';
 import type { AppContext } from '../commands/context.js';
+import { findByKeyOrVerb } from '../core/status.js';
 
 export function addFilterOptions(cmd: Command): Command {
     return cmd
@@ -21,17 +21,29 @@ export function addFilterOptions(cmd: Command): Command {
         .option('-s, --search <query>', 'Fuzzy search tasks');
 }
 
-export function buildFilters(opts: Record<string, unknown>): TaskFilters {
+export function buildFilters(opts: Record<string, unknown>, ctx?: AppContext): TaskFilters {
     const filters: TaskFilters = {};
     if (opts.priority) filters.priority = opts.priority as TaskPriority;
     if (opts.tag) filters.tags = opts.tag as string[];
     if (opts.project) filters.projectName = opts.project as string;
-    if (opts.status) filters.status = normalizeStatus(opts.status as string);
+    if (opts.status) {
+        // Resolve via registry if available, otherwise use as-is
+        if (ctx) {
+            const defs = ctx.statusRepo.list();
+            const def = findByKeyOrVerb(defs, opts.status as string);
+            filters.status = def ? def.key : (opts.status as string);
+        } else {
+            filters.status = opts.status as string;
+        }
+    }
     if (opts.due) filters.dueDate = opts.due as string;
     if (opts.created) filters.createdDate = opts.created as string;
     if (opts.all) filters.includeArchived = true;
-    if (!opts.status && !opts.all) {
-        filters.status = ['pending', 'in_progress', 'in_qa', 'done'];
+    if (!opts.status && !opts.all && ctx) {
+        // Default: exclude archived statuses using the registry
+        const defs = ctx.statusRepo.list();
+        const nonArchived = defs.filter(d => !d.archives).map(d => d.key);
+        filters.status = nonArchived;
     }
     return filters;
 }
@@ -60,7 +72,7 @@ export function filterAndSearchTasks(
     ctx: AppContext,
     opts: FilterOpts,
 ): { tasks: TaskWithRelations[]; filters: TaskFilters; sort: TaskSort | undefined } {
-    const filters = buildFilters(opts as Record<string, unknown>);
+    const filters = buildFilters(opts as Record<string, unknown>, ctx);
     const sort: TaskSort | undefined = opts.sort
         ? { field: opts.sort as TaskSort['field'], direction: opts.reverse ? 'asc' : 'desc' }
         : undefined;

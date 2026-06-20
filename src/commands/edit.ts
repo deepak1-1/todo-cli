@@ -1,20 +1,21 @@
 // ============================================================
-// todo edit <id> — Modify a task (fields, status, dependencies)
+// todo edit <id> — Modify a task (fields, dependencies)
 // ============================================================
 
-import { Command, Option } from 'commander';
+import { Command } from 'commander';
 import { getContext } from './context.js';
 import { theme } from '../utils/theme.js';
 import { getHookManager } from '../plugins/hook-manager.js';
-import { validateTransition, getTransitionTimestamps, handleRecurringCompletion } from '../core/task.js';
+import { handleRecurringCompletion } from '../core/task.js';
 import { parseDate } from '../utils/date.js';
 import { success, error, formatStatus, parseId } from '../utils/format.js';
 import { logWarn } from '../utils/logger.js';
 import { fail, EXIT, requireEntity } from '../utils/exit.js';
 import { emitJson } from '../utils/json-output.js';
-import { TASK_STATUSES, VALID_RECURRENCES, normalizePriority, PRIORITY_ERROR } from '../core/types.js';
-import type { Task, TaskPriority, TaskStatus, RecurrencePattern, EditOptions } from '../core/types.js';
+import { VALID_RECURRENCES, normalizePriority, PRIORITY_ERROR } from '../core/types.js';
+import type { Task, TaskPriority, RecurrencePattern, EditOptions } from '../core/types.js';
 import type { AppContext } from './context.js';
+import { findByKeyOrVerb, getTransitionTimestamps } from '../core/status.js';
 import { format } from 'date-fns';
 
 /** Pure mutating core for edit: validate, apply, hook, log. Throws on invalid input. */
@@ -27,9 +28,8 @@ export function applyEdit(
     if (!task) throw new Error(`Task #${id} not found`);
 
     const prevState = JSON.stringify(task);
-    const targetStatus = opts.status as TaskStatus | undefined;
-
-    if (targetStatus) validateTransition(task, targetStatus);
+    const defs = ctx.statusRepo.list();
+    const targetStatus = opts.status ? findByKeyOrVerb(defs, opts.status)?.key : undefined;
 
     const changes: Record<string, unknown> = {};
 
@@ -56,13 +56,14 @@ export function applyEdit(
 
     if (targetStatus) {
         changes.status = targetStatus;
-        Object.assign(changes, getTransitionTimestamps(targetStatus));
+        Object.assign(changes, getTransitionTimestamps(defs, targetStatus));
     }
 
     const updated = ctx.taskRepo.update(id, changes);
 
     if (updated) {
-        if (targetStatus === 'done') {
+        const completingDef = targetStatus ? defs.find(d => d.key === targetStatus) : undefined;
+        if (completingDef?.completes) {
             getHookManager().onTaskComplete(updated).catch((e) => logWarn(`Hook error: ${e instanceof Error ? e.message : String(e)}`));
         } else if (Object.keys(changes).length > 0) {
             getHookManager().onTaskUpdate(updated, changes as Partial<Task>).catch((e) => logWarn(`Hook error: ${e instanceof Error ? e.message : String(e)}`));
@@ -113,7 +114,8 @@ export function applyEdit(
     }
 
     let recurring: { id: number; dueDate: string } | undefined;
-    if (targetStatus === 'done' && task.recurrence) {
+    const completingStatus = targetStatus && defs.find(d => d.key === targetStatus && d.completes);
+    if (completingStatus && task.recurrence) {
         const newTask = handleRecurringCompletion(task, ctx.taskRepo, ctx.tagRepo);
         if (newTask) {
             const nextDue = newTask.dueDate ? new Date(newTask.dueDate) : new Date();
@@ -126,8 +128,9 @@ export function applyEdit(
 
 export function executeEdit(id: number, opts: EditOptions, { silent = false, json = false } = {}): void {
     const ctx = getContext();
+    const defs = ctx.statusRepo.list();
 
-    // Validate priority/recur/status before calling applyEdit
+    // Validate priority/recur before calling applyEdit
     if (opts.priority && normalizePriority(opts.priority) === null) {
         return fail(EXIT.USAGE, PRIORITY_ERROR, { json, command: 'edit' });
     }
@@ -136,8 +139,12 @@ export function executeEdit(id: number, opts: EditOptions, { silent = false, jso
         return fail(EXIT.USAGE, `Invalid recurrence "${opts.recur}". Valid values: ${VALID_RECURRENCES.join(', ')}`, { json, command: 'edit' });
     }
 
-    if (opts.status && !TASK_STATUSES.includes(opts.status as TaskStatus)) {
-        return fail(EXIT.USAGE, `Invalid status "${opts.status}". Valid values: ${TASK_STATUSES.join(', ')}`, { json, command: 'edit' });
+    if (opts.status) {
+        const statusDef = findByKeyOrVerb(defs, opts.status);
+        if (!statusDef) {
+            const validKeys = defs.map(d => d.key).join(', ');
+            return fail(EXIT.USAGE, `Invalid status "${opts.status}". Valid statuses: ${validKeys}`, { json, command: 'edit' });
+        }
     }
 
     const taskCheck = ctx.taskRepo.getById(id);
@@ -186,7 +193,7 @@ export function executeEdit(id: number, opts: EditOptions, { silent = false, jso
         emitJson(recurringInfo ? { ...payload, recurring: recurringInfo } : payload);
     } else if (!silent) {
         if (opts.status) {
-            console.log(success(`Task ${theme().heading.chalk('#' + id)} ${formatStatus(opts.status as TaskStatus)}`));
+            console.log(success(`Task ${theme().heading.chalk('#' + id)} ${formatStatus(opts.status, defs)}`));
         } else {
             console.log(success(`Updated task ${theme().heading.chalk('#' + id)}`));
         }
@@ -201,7 +208,6 @@ function handleDependencyOption(
     silent = false,
 ): void {
     for (const input of inputs) {
-        // Parse comma-separated IDs within each input
         const parts = input.split(',').map(s => s.trim()).filter(Boolean);
         for (const part of parts) {
             const isAdd = part.startsWith('+');
@@ -220,8 +226,6 @@ function handleDependencyOption(
                 continue;
             }
 
-            // For 'depends': taskId depends on depId
-            // For 'blocks': depId depends on taskId (reverse)
             const fromId = direction === 'depends' ? taskId : depId;
             const toId = direction === 'depends' ? depId : taskId;
 
@@ -235,7 +239,6 @@ function handleDependencyOption(
                     }
                 }
             } else {
-                // Add (with or without + prefix)
                 if (ctx.depRepo.wouldCreateCycle(fromId, toId)) {
                     console.error(error(`Adding dependency would create a cycle`));
                     continue;
@@ -265,30 +268,9 @@ export const editCommand = new Command('edit')
     .option('-r, --recur <pattern>', 'Recurrence pattern')
     .option('--no-due', 'Remove due date')
     .option('--no-project', 'Remove from project')
-    .option('-S, --status <state>', 'Transition status (pending, in_progress, done, archived)')
-    // -s is a hidden backwards-compat alias; -S is the canonical short flag
-    .addOption(new Option('-s, --status-deprecated <state>', 'Deprecated alias for --status; use -S').hideHelp(true))
     .option('--depends <ids...>', 'Dependencies (+id to add, -id to remove)')
     .option('--blocks <ids...>', 'Tasks this blocks (+id to add, -id to remove)')
     .option('--json', 'Output JSON instead of human-readable text')
-    .addHelpText('after', `
-Examples:
-  $ todo edit 5 -S done          # canonical short flag
-  $ todo edit 5 -s done          # deprecated: use -S; -s will become --search in a future release
-  $ todo edit 5 --status done    # long form always works`)
-    .hook('preAction', (cmd) => {
-        // Promote deprecated -s value into status and warn unless in --json mode
-        const opts = cmd.opts() as Record<string, unknown>;
-        if (opts.statusDeprecated) {
-            if (!opts.status) opts.status = opts.statusDeprecated;
-            // Suppress warning in --json mode; structured callers must not get noise on stderr
-            if (!opts.json) {
-                process.stderr.write(
-                    "warning: -s for --status is deprecated on 'todo edit'; use -S. -s will become --search in a future release.\n",
-                );
-            }
-        }
-    })
     .action((rawId: string, opts) => {
         const id = parseId(rawId);
         executeEdit(id, opts, { json: !!opts.json });

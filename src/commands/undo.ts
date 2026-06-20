@@ -26,46 +26,34 @@ export const undoCommand = new Command('undo')
             return;
         }
 
+        const defaultStatusKey = ctx.statusRepo.list().find(d => d.verb === 'reopen')?.key ?? 'todo';
+
         try {
             let undoneAction = '';
-            switch (last.action) {
-                case 'create': {
-                    if (last.taskId) {
-                        ctx.taskRepo.delete(last.taskId);
-                        undoneAction = `removed created task #${last.taskId}`;
-                        if (!opts.json) console.log(success(`Undone: ${undoneAction}`));
-                    }
-                    break;
+            const isStatusAction = last.action === 'update' || last.action.startsWith('status_');
+            if (last.action === 'create') {
+                if (last.taskId) {
+                    ctx.taskRepo.delete(last.taskId);
+                    undoneAction = `removed created task #${last.taskId}`;
+                    if (!opts.json) console.log(success(`Undone: ${undoneAction}`));
                 }
-                case 'update':
-                case 'status_pending':
-                case 'status_in_progress':
-                case 'status_done':
-                case 'status_archived': {
-                    if (last.taskId && last.prevState) {
-                        const prev = JSON.parse(last.prevState);
-                        ctx.taskRepo.update(last.taskId, prev);
-                        undoneAction = `restored task #${last.taskId} to previous state`;
-                        if (!opts.json) console.log(success(`Undone: ${undoneAction}`));
-                    }
-                    break;
+            } else if (isStatusAction && last.taskId && last.prevState) {
+                const prev = JSON.parse(last.prevState);
+                ctx.taskRepo.update(last.taskId, prev);
+                undoneAction = `restored task #${last.taskId} to previous state`;
+                if (!opts.json) console.log(success(`Undone: ${undoneAction}`));
+            } else if (last.action === 'archive' && last.taskId && last.prevState) {
+                const prev = JSON.parse(last.prevState);
+                ctx.taskRepo.update(last.taskId, { status: prev.status || defaultStatusKey, archivedAt: null });
+                undoneAction = `unarchived task #${last.taskId}`;
+                if (!opts.json) console.log(success(`Undone: ${undoneAction}`));
+            } else {
+                if (opts.json) {
+                    emitJson({ ok: true, command: 'undo', data: { action: 'unsupported', type: last.action } });
+                } else {
+                    console.log(warn(`Cannot undo action type: ${last.action}`));
                 }
-                case 'archive': {
-                    if (last.taskId && last.prevState) {
-                        const prev = JSON.parse(last.prevState);
-                        ctx.taskRepo.update(last.taskId, { status: prev.status || 'pending', archivedAt: null });
-                        undoneAction = `unarchived task #${last.taskId}`;
-                        if (!opts.json) console.log(success(`Undone: ${undoneAction}`));
-                    }
-                    break;
-                }
-                default:
-                    if (opts.json) {
-                        emitJson({ ok: true, command: 'undo', data: { action: 'unsupported', type: last.action } });
-                    } else {
-                        console.log(warn(`Cannot undo action type: ${last.action}`));
-                    }
-                    return;
+                return;
             }
 
             ctx.actionLog.deleteLast();

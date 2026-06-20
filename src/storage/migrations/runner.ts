@@ -8,6 +8,7 @@ import * as migration002 from './002-time-tracking.js';
 import * as migration003 from './003-project-name-nocase.js';
 import * as migration004 from './004-fix-tasks-fk.js';
 import * as migration005 from './005-add-in-qa-status.js';
+import * as migration006 from './006-dynamic-statuses.js';
 
 interface Migration {
     name: string;
@@ -23,6 +24,7 @@ const migrations: Migration[] = [
     { name: '003-project-name-nocase', up: migration003.up, down: migration003.down, requiresNoTransaction: migration003.requiresNoTransaction },
     { name: '004-fix-tasks-fk', up: migration004.up, down: migration004.down, requiresNoTransaction: migration004.requiresNoTransaction },
     { name: '005-add-in-qa-status', up: migration005.up, down: migration005.down, requiresNoTransaction: migration005.requiresNoTransaction },
+    { name: '006-dynamic-statuses', up: migration006.up, down: migration006.down, requiresNoTransaction: migration006.requiresNoTransaction },
 ];
 
 /** Ensure the _migrations tracking table exists */
