@@ -1,4 +1,4 @@
-// Default theme — mirrors the exact chalk choices used before theme support.
+// Default theme — uses truecolor hexes for consistent rendering across terminals.
 import chalk from 'chalk';
 import type { Palette, PaletteEntry } from '../theme.js';
 import { registerTheme } from '../theme.js';
@@ -14,7 +14,7 @@ export const defaultTheme = {
         return {
             priorityUrgent: e(chalk.red.bold, 'redBright'),
             priorityHigh: e(chalk.yellow, 'yellow'),
-            priorityMedium: e(chalk.blue, 'blue'),
+            priorityMedium: e(chalk.hex('#5fafff'), '#5fafff'),
             priorityLow: e(chalk.gray, 'gray'),
 
             statusPending: e(chalk.white, 'white'),
@@ -24,15 +24,15 @@ export const defaultTheme = {
             statusArchived: e(chalk.gray, 'gray'),
 
             id: e(chalk.gray, 'gray'),
-            ref: e(chalk.blue, 'blue'),
-            project: e(chalk.magenta, 'magenta'),
+            ref: e(chalk.hex('#5fafff'), '#5fafff'),
+            project: e(chalk.hex('#14b8a6'), '#14b8a6'),
             tag: e(chalk.cyan, 'cyan'),
 
             dateOverdue: e(chalk.red.bold, 'redBright'),
             dateNormal: e(chalk.yellow, 'yellow'),
             blocked: e(chalk.red, 'red'),
 
-            info: e(chalk.blue, 'blue'),
+            info: e(chalk.hex('#5fafff'), '#5fafff'),
             success: e(chalk.green, 'green'),
             warning: e(chalk.yellow, 'yellow'),
             error: e(chalk.red, 'red'),
@@ -47,7 +47,7 @@ export const defaultTheme = {
             cursor: e(chalk.gray, 'gray'),
 
             title: e(chalk.cyan.bold, 'cyan'),
-            subtitle: e(chalk.blue, 'blue'),
+            subtitle: e(chalk.hex('#5fafff'), '#5fafff'),
             body: e(chalk.white, 'white'),
             panelBorder: e(chalk.gray, 'gray'),
         };

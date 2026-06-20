@@ -8,22 +8,22 @@ export interface ProjectColor {
 }
 
 export const PROJECT_PALETTE: readonly ProjectColor[] = [
-    { name: 'sky',      hex: '#0ea5e9' },
-    { name: 'violet',   hex: '#8b5cf6' },
-    { name: 'orange',   hex: '#f97316' },
-    { name: 'teal',     hex: '#14b8a6' },
-    { name: 'pink',     hex: '#ec4899' },
-    { name: 'amber',    hex: '#f59e0b' },
-    { name: 'indigo',   hex: '#6366f1' },
-    { name: 'cyan',     hex: '#06b6d4' },
-    { name: 'fuchsia',  hex: '#d946ef' },
-    { name: 'yellow',   hex: '#eab308' },
-    { name: 'blue',     hex: '#3b82f6' },
-    { name: 'slate',    hex: '#64748b' },
-    { name: 'rose',     hex: '#f43f5e' },
-    { name: 'lime',     hex: '#84cc16' },
-    { name: 'emerald',  hex: '#10b981' },
-    { name: 'stone',    hex: '#a8a29e' },
+    { name: 'sky',     hex: '#0ea5e9' },
+    { name: 'mint',    hex: '#2dd4bf' },
+    { name: 'orange',  hex: '#f97316' },
+    { name: 'teal',    hex: '#14b8a6' },
+    { name: 'pink',    hex: '#ec4899' },
+    { name: 'amber',   hex: '#f59e0b' },
+    { name: 'cobalt',  hex: '#1d4ed8' },
+    { name: 'cyan',    hex: '#06b6d4' },
+    { name: 'coral',   hex: '#fb7185' },
+    { name: 'yellow',  hex: '#eab308' },
+    { name: 'blue',    hex: '#3b82f6' },
+    { name: 'slate',   hex: '#64748b' },
+    { name: 'rose',    hex: '#f43f5e' },
+    { name: 'lime',    hex: '#84cc16' },
+    { name: 'emerald', hex: '#10b981' },
+    { name: 'stone',   hex: '#a8a29e' },
 ];
 
 // FNV-1a 32-bit hash — no deps, deterministic.

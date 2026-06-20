@@ -26,7 +26,7 @@ describe('ProjectRepository.create — auto color assignment', () => {
         const p1 = projectRepo.create({ name: 'Alpha' });
         const p2 = projectRepo.create({ name: 'Beta' });
         expect(p1.color).toBe('#0ea5e9'); // sky
-        expect(p2.color).toBe('#8b5cf6'); // violet
+        expect(p2.color).toBe('#2dd4bf'); // mint
     });
 
     it('respects an explicitly provided hex color', () => {

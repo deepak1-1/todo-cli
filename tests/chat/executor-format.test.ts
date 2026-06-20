@@ -7,8 +7,8 @@ import chalk from 'chalk';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import '../../src/utils/initThemes.js';
 import { loadTheme } from '../../src/utils/theme.js';
-import { priorityColors, statusColors } from '../../src/utils/format.js';
-import type { TaskPriority, TaskStatus } from '../../src/core/types.js';
+import { priorityColors, statusChalkFn } from '../../src/utils/format.js';
+import type { TaskPriority } from '../../src/core/types.js';
 
 const originalLevel = chalk.level;
 beforeAll(() => {
@@ -26,8 +26,8 @@ describe('priorityColors — canonical map produces expected ANSI output', () =>
         expect(priorityColors['high']('high')).toBe(chalk.yellow('high'));
     });
 
-    it('medium → chalk.blue', () => {
-        expect(priorityColors['medium']('medium')).toBe(chalk.blue('medium'));
+    it('medium → theme priorityMedium (#5fafff)', () => {
+        expect(priorityColors['medium']('medium')).toBe(chalk.hex('#5fafff')('medium'));
     });
 
     it('low → chalk.gray', () => {
@@ -42,31 +42,31 @@ describe('priorityColors — canonical map produces expected ANSI output', () =>
     });
 });
 
-describe('statusColors — canonical map produces expected ANSI output', () => {
-    it('done → chalk.green', () => {
-        expect(statusColors['done']('done')).toBe(chalk.green('done'));
+describe('statusChalkFn — produces styled output for dynamic status keys', () => {
+    it('done → chalk.green equivalent', () => {
+        expect(statusChalkFn('done')('done')).toBe(chalk.green('done'));
     });
 
-    it('in_progress → chalk.cyan', () => {
-        expect(statusColors['in_progress']('in_progress')).toBe(chalk.cyan('in_progress'));
+    it('in_progress → chalk.cyan equivalent', () => {
+        expect(statusChalkFn('in_progress')('in_progress')).toBe(chalk.cyan('in_progress'));
     });
 
-    it('in_qa → chalk.yellow', () => {
-        expect(statusColors['in_qa']('in_qa')).toBe(chalk.yellow('in_qa'));
+    it('in_review → chalk.yellow equivalent', () => {
+        expect(statusChalkFn('in_review')('in_review')).toBe(chalk.yellow('in_review'));
     });
 
-    it('pending → chalk.white', () => {
-        expect(statusColors['pending']('pending')).toBe(chalk.white('pending'));
+    it('todo → chalk.white equivalent (same theme slot as old pending)', () => {
+        expect(statusChalkFn('todo')('todo')).toBe(chalk.white('todo'));
     });
 
-    it('archived → chalk.gray (canonical; old executor used chalk.white as fallthrough)', () => {
-        expect(statusColors['archived']('archived')).toBe(chalk.gray('archived'));
+    it('archived → chalk.gray equivalent', () => {
+        expect(statusChalkFn('archived')('archived')).toBe(chalk.gray('archived'));
     });
 
-    it('covers all TaskStatus values', () => {
-        const statuses: TaskStatus[] = ['pending', 'in_progress', 'in_qa', 'done', 'archived'];
+    it('covers all new builtin status keys without throwing', () => {
+        const statuses = ['todo', 'in_progress', 'in_review', 'blocked', 'done', 'archived'];
         for (const s of statuses) {
-            expect(() => statusColors[s](s)).not.toThrow();
+            expect(() => statusChalkFn(s)(s)).not.toThrow();
         }
     });
 });

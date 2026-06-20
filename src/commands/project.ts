@@ -21,7 +21,7 @@ projectCommand
     .description('Create a new project')
     .argument('<name>', 'Project name')
     .option('-D, --description <text>', 'Description')
-    .option('-c, --color <color>', 'Palette color name or hex (e.g. violet, #8b5cf6)')
+    .option('-c, --color <color>', 'Palette color name or hex (e.g. teal, #14b8a6)')
     .action((name: string, opts) => {
         const ctx = getContext();
 

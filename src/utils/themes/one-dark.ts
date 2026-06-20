@@ -13,7 +13,7 @@ const OD_YELLOW = '#e5c07b';
 const OD_GREEN  = '#98c379';
 const OD_CYAN   = '#56b6c2';
 const OD_BLUE   = '#61afef';
-const OD_PURPLE = '#c678dd';
+const OD_TEAL   = '#45c4b0';
 const OD_FG     = '#abb2bf';
 const OD_MUTED  = '#5c6370';
 
@@ -35,7 +35,7 @@ export const oneDarkTheme = {
 
             id: e(chalk.hex(OD_MUTED), OD_MUTED),
             ref: e(chalk.hex(OD_BLUE), OD_BLUE),
-            project: e(chalk.hex(OD_PURPLE), OD_PURPLE),
+            project: e(chalk.hex(OD_TEAL), OD_TEAL),
             tag: e(chalk.hex(OD_CYAN), OD_CYAN),
 
             dateOverdue: e(chalk.hex(OD_RED).bold, OD_RED),
@@ -49,14 +49,14 @@ export const oneDarkTheme = {
             debug: e(chalk.hex(OD_MUTED), OD_MUTED),
 
             muted: e(chalk.hex(OD_MUTED), OD_MUTED),
-            accent: e(chalk.hex(OD_PURPLE), OD_PURPLE),
+            accent: e(chalk.hex(OD_TEAL), OD_TEAL),
             heading: e(chalk.hex(OD_FG).bold, OD_FG),
             tableBorder: e(chalk.hex(OD_MUTED), OD_MUTED),
             tableHeader: e(chalk.hex(OD_BLUE), OD_BLUE),
             prompt: e(chalk.hex(OD_CYAN), OD_CYAN),
             cursor: e(chalk.hex(OD_MUTED), OD_MUTED),
 
-            title: e(chalk.hex(OD_PURPLE).bold, OD_PURPLE),
+            title: e(chalk.hex(OD_TEAL).bold, OD_TEAL),
             subtitle: e(chalk.hex(OD_BLUE), OD_BLUE),
             body: e(chalk.hex(OD_FG), OD_FG),
             panelBorder: e(chalk.hex(OD_MUTED), OD_MUTED),

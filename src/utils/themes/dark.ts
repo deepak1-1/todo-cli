@@ -25,7 +25,7 @@ export const darkTheme = {
 
             id: e(chalk.hex('#808080'), '#808080'),
             ref: e(chalk.hex('#5fafff'), '#5fafff'),
-            project: e(chalk.hex('#d787ff'), '#d787ff'),
+            project: e(chalk.hex('#5fd7af'), '#5fd7af'),
             tag: e(chalk.hex('#00d7ff'), '#00d7ff'),
 
             dateOverdue: e(chalk.hex('#ff5f5f').bold, '#ff5f5f'),

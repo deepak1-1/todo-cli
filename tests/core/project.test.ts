@@ -53,7 +53,7 @@ describe('validateCreateProjectInput', () => {
     });
 
     it('should accept valid hex colors', () => {
-        const validColors = ['#0ea5e9', '#8b5cf6', '#ffffff', '#000000'];
+        const validColors = ['#0ea5e9', '#14b8a6', '#ffffff', '#000000'];
         for (const color of validColors) {
             const result = validateCreateProjectInput({ name: 'Test', color });
             expect(result.color).toBe(color);

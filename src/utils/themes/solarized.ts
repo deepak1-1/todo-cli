@@ -7,16 +7,14 @@ function e(chalkFn: (s: string) => string, ink: string): PaletteEntry {
     return { chalk: chalkFn as unknown as import('chalk').ChalkInstance, ink };
 }
 
-const SOL_RED = '#dc322f';
+const SOL_RED    = '#dc322f';
 const SOL_ORANGE = '#cb4b16';
 const SOL_YELLOW = '#b58900';
-const SOL_GREEN = '#859900';
-const SOL_CYAN = '#2aa198';
-const SOL_BLUE = '#268bd2';
-const SOL_VIOLET = '#6c71c4';
-const SOL_MAGENTA = '#d33682';
-const SOL_BASE0 = '#839496';
-const SOL_BASE1 = '#93a1a1';
+const SOL_GREEN  = '#859900';
+const SOL_CYAN   = '#2aa198';
+const SOL_BLUE   = '#268bd2';
+const SOL_BASE0  = '#839496';
+const SOL_BASE1  = '#93a1a1';
 const SOL_BASE01 = '#586e75';
 
 export const solarizedTheme = {
@@ -37,7 +35,7 @@ export const solarizedTheme = {
 
             id: e(chalk.hex(SOL_BASE01), SOL_BASE01),
             ref: e(chalk.hex(SOL_BLUE), SOL_BLUE),
-            project: e(chalk.hex(SOL_MAGENTA), SOL_MAGENTA),
+            project: e(chalk.hex(SOL_GREEN), SOL_GREEN),
             tag: e(chalk.hex(SOL_CYAN), SOL_CYAN),
 
             dateOverdue: e(chalk.hex(SOL_RED).bold, SOL_RED),
@@ -51,7 +49,7 @@ export const solarizedTheme = {
             debug: e(chalk.hex(SOL_BASE01), SOL_BASE01),
 
             muted: e(chalk.hex(SOL_BASE01), SOL_BASE01),
-            accent: e(chalk.hex(SOL_VIOLET), SOL_VIOLET),
+            accent: e(chalk.hex(SOL_CYAN), SOL_CYAN),
             heading: e(chalk.hex(SOL_BASE1).bold, SOL_BASE1),
             tableBorder: e(chalk.hex(SOL_BASE01), SOL_BASE01),
             tableHeader: e(chalk.hex(SOL_CYAN), SOL_CYAN),

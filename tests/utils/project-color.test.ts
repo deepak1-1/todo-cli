@@ -46,7 +46,7 @@ describe('pickNextProjectColor', () => {
 
     it('returns the first unused hex', () => {
         const used = ['#0ea5e9']; // sky is used
-        expect(pickNextProjectColor(used)).toBe('#8b5cf6'); // violet
+        expect(pickNextProjectColor(used)).toBe('#2dd4bf'); // mint
     });
 
     it('skips all used hexes and picks first free', () => {
@@ -56,7 +56,7 @@ describe('pickNextProjectColor', () => {
 
     it('comparison is case-insensitive', () => {
         const used = ['#0EA5E9']; // sky in uppercase
-        expect(pickNextProjectColor(used)).toBe('#8b5cf6');
+        expect(pickNextProjectColor(used)).toBe('#2dd4bf'); // mint is slot 1
     });
 
     it('falls back to FNV-1a hash when all 16 used (17th project)', () => {
@@ -73,26 +73,33 @@ describe('pickNextProjectColor', () => {
 
 describe('resolveProjectColor', () => {
     it('resolves palette name to hex', () => {
-        expect(resolveProjectColor('violet')).toBe('#8b5cf6');
+        expect(resolveProjectColor('mint')).toBe('#2dd4bf');
     });
 
     it('is case-insensitive for name lookup', () => {
-        expect(resolveProjectColor('Violet')).toBe('#8b5cf6');
-        expect(resolveProjectColor('VIOLET')).toBe('#8b5cf6');
+        expect(resolveProjectColor('Mint')).toBe('#2dd4bf');
+        expect(resolveProjectColor('MINT')).toBe('#2dd4bf');
     });
 
     it('accepts lowercase hex', () => {
-        expect(resolveProjectColor('#8b5cf6')).toBe('#8b5cf6');
+        expect(resolveProjectColor('#2dd4bf')).toBe('#2dd4bf');
     });
 
     it('normalizes uppercase hex to lowercase', () => {
-        expect(resolveProjectColor('#8B5CF6')).toBe('#8b5cf6');
+        expect(resolveProjectColor('#2DD4BF')).toBe('#2dd4bf');
     });
 
     it('returns null for unrecognized input', () => {
         expect(resolveProjectColor('bogus')).toBeNull();
         expect(resolveProjectColor('#xyz')).toBeNull();
         expect(resolveProjectColor('rainbow')).toBeNull();
+    });
+
+    it('returns null for removed palette names (violet/indigo/fuchsia)', () => {
+        // These names were removed from the palette in the color-removal change
+        expect(resolveProjectColor('violet')).toBeNull();
+        expect(resolveProjectColor('indigo')).toBeNull();
+        expect(resolveProjectColor('fuchsia')).toBeNull();
     });
 
     it('returns null for short hex', () => {
@@ -102,14 +109,14 @@ describe('resolveProjectColor', () => {
 
 describe('isValidProjectColor', () => {
     it('accepts known palette names', () => {
-        expect(isValidProjectColor('violet')).toBe(true);
-        expect(isValidProjectColor('Violet')).toBe(true);
+        expect(isValidProjectColor('mint')).toBe(true);
+        expect(isValidProjectColor('Mint')).toBe(true);
         expect(isValidProjectColor('teal')).toBe(true);
     });
 
     it('accepts valid 7-char hex', () => {
-        expect(isValidProjectColor('#8b5cf6')).toBe(true);
-        expect(isValidProjectColor('#8B5CF6')).toBe(true);
+        expect(isValidProjectColor('#2dd4bf')).toBe(true);
+        expect(isValidProjectColor('#2DD4BF')).toBe(true);
     });
 
     it('rejects bogus strings', () => {
@@ -117,11 +124,17 @@ describe('isValidProjectColor', () => {
         expect(isValidProjectColor('#xyz')).toBe(false);
         expect(isValidProjectColor('')).toBe(false);
     });
+
+    it('rejects removed palette names (violet/indigo/fuchsia)', () => {
+        expect(isValidProjectColor('violet')).toBe(false);
+        expect(isValidProjectColor('indigo')).toBe(false);
+        expect(isValidProjectColor('fuchsia')).toBe(false);
+    });
 });
 
 describe('colorizeProject', () => {
     it('uses chalk.hex for a valid hex', () => {
-        const result = colorizeProject('myproject', '#8b5cf6');
+        const result = colorizeProject('myproject', '#2dd4bf');
         expect(result).toContain('myproject');
     });
 
@@ -151,7 +164,7 @@ describe('colorizeProject', () => {
 
     it('produces different ANSI output for hex vs white (chalk enabled)', () => {
         // hex path uses chalk.hex(), white path uses theme project role
-        const withHex = colorizeProject('proj', '#8b5cf6');
+        const withHex = colorizeProject('proj', '#2dd4bf');
         const withWhite = colorizeProject('proj', 'white');
         // Both contain the name; their ANSI wrapping differs
         expect(withHex).toContain('proj');
@@ -161,15 +174,15 @@ describe('colorizeProject', () => {
 
     it('produces different ANSI output for two distinct hex values', () => {
         const sky = colorizeProject('proj', '#0ea5e9');
-        const violet = colorizeProject('proj', '#8b5cf6');
-        expect(sky).not.toBe(violet);
+        const mint = colorizeProject('proj', '#2dd4bf');
+        expect(sky).not.toBe(mint);
     });
 });
 
 describe('pickNextProjectColor — non-sequential used set', () => {
-    it('picks sky when only violet is used (first-unused wins, not next-sequential)', () => {
-        // User manually set violet; sky slot is still free → picks sky
-        const used = ['#8b5cf6']; // violet used, sky not
+    it('picks sky when only mint is used (first-unused wins, not next-sequential)', () => {
+        // User manually set mint; sky slot is still free → picks sky
+        const used = ['#2dd4bf']; // mint used, sky not
         expect(pickNextProjectColor(used)).toBe('#0ea5e9'); // sky is first in palette
     });
 

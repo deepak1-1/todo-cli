@@ -7,15 +7,15 @@ function e(chalkFn: (s: string) => string, ink: string): PaletteEntry {
     return { chalk: chalkFn as unknown as import('chalk').ChalkInstance, ink };
 }
 
-const GV_RED     = '#fb4934';
-const GV_ORANGE  = '#fe8019';
-const GV_YELLOW  = '#fabd2f';
-const GV_GREEN   = '#b8bb26';
-const GV_AQUA    = '#8ec07c';
-const GV_BLUE    = '#83a598';
-const GV_PURPLE  = '#d3869b';
-const GV_FG      = '#ebdbb2';
-const GV_MUTED   = '#928374';
+const GV_RED    = '#fb4934';
+const GV_ORANGE = '#fe8019';
+const GV_YELLOW = '#fabd2f';
+const GV_GREEN  = '#b8bb26';
+const GV_AQUA   = '#8ec07c';
+const GV_BLUE   = '#83a598';
+const GV_AQUA2  = '#689d6a';
+const GV_FG     = '#ebdbb2';
+const GV_MUTED  = '#928374';
 
 export const gruvboxDarkTheme = {
     name: 'gruvbox-dark',
@@ -35,7 +35,7 @@ export const gruvboxDarkTheme = {
 
             id: e(chalk.hex(GV_MUTED), GV_MUTED),
             ref: e(chalk.hex(GV_BLUE), GV_BLUE),
-            project: e(chalk.hex(GV_PURPLE), GV_PURPLE),
+            project: e(chalk.hex(GV_AQUA2), GV_AQUA2),
             tag: e(chalk.hex(GV_AQUA), GV_AQUA),
 
             dateOverdue: e(chalk.hex(GV_RED).bold, GV_RED),

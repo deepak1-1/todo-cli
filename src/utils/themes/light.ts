@@ -25,7 +25,7 @@ export const lightTheme = {
 
             id: e(chalk.hex('#606060'), '#606060'),
             ref: e(chalk.hex('#005faf'), '#005faf'),
-            project: e(chalk.hex('#5f00af'), '#5f00af'),
+            project: e(chalk.hex('#007855'), '#007855'),
             tag: e(chalk.hex('#005f87'), '#005f87'),
 
             dateOverdue: e(chalk.red.bold, 'red'),

@@ -29,7 +29,7 @@ export function validateCreateProjectInput(input: CreateProjectInput): CreatePro
 
     if (normalized.color && !isValidColor(normalized.color)) {
         throw new ProjectValidationError(
-            `Invalid color "${normalized.color}". Provide a hex color like #8b5cf6.`,
+            `Invalid color "${normalized.color}". Provide a hex color like #14b8a6.`,
         );
     }
 
@@ -47,7 +47,7 @@ export function validateUpdateProjectInput(input: UpdateProjectInput): UpdatePro
 
     if (normalized.color && !isValidColor(normalized.color)) {
         throw new ProjectValidationError(
-            `Invalid color "${normalized.color}". Provide a hex color like #8b5cf6.`,
+            `Invalid color "${normalized.color}". Provide a hex color like #14b8a6.`,
         );
     }
 

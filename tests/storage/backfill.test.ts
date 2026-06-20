@@ -65,8 +65,8 @@ describe('backfillProjectColors', () => {
         backfillProjectColors(db);
 
         const stale = db.prepare("SELECT color FROM projects WHERE name = 'Stale'").get() as { color: string };
-        // sky (#0ea5e9) is already used — so next should be violet
-        expect(stale.color).toBe('#8b5cf6');
+        // sky (#0ea5e9) is already used — so next should be mint
+        expect(stale.color).toBe('#2dd4bf');
     });
 
     it('is idempotent — second run makes no changes', () => {

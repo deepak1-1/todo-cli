@@ -150,17 +150,21 @@ describe('formatPriorityBracket', () => {
 
 describe('formatStatus', () => {
     it('should format each status with icon and label', () => {
-        expect(formatStatus('pending')).toContain('pending');
+        expect(formatStatus('todo')).toContain('todo');
         expect(formatStatus('in_progress')).toContain('in progress');
+        expect(formatStatus('in_review')).toContain('in review');
+        expect(formatStatus('blocked')).toContain('blocked');
         expect(formatStatus('done')).toContain('done');
         expect(formatStatus('archived')).toContain('archived');
     });
 
-    it('should include status icons', () => {
-        expect(formatStatus('pending')).toContain('○');
+    it('should include status icons for new dynamic statuses', () => {
+        expect(formatStatus('todo')).toContain('○');
         expect(formatStatus('in_progress')).toContain('◐');
-        expect(formatStatus('done')).toContain('●');
-        expect(formatStatus('archived')).toContain('◌');
+        expect(formatStatus('in_review')).toContain('◔');
+        expect(formatStatus('blocked')).toContain('⊘');
+        expect(formatStatus('done')).toContain('✓');
+        expect(formatStatus('archived')).toContain('⌀');
     });
 });
 
@@ -300,11 +304,11 @@ describe('formatTaskTable', () => {
     it('two tasks with different project hex colors produce distinct ANSI for the project column', () => {
         // Uses chalk level 3 (set in beforeEach) to verify ANSI codes actually differ
         const taskSky = makeTask({ id: 1, projectName: 'Sky-proj', projectColor: '#0ea5e9' });
-        const taskViolet = makeTask({ id: 2, projectName: 'Sky-proj', projectColor: '#8b5cf6' });
+        const taskTeal = makeTask({ id: 2, projectName: 'Sky-proj', projectColor: '#14b8a6' });
         const tableSky = formatTaskTable([taskSky]);
-        const tableViolet = formatTaskTable([taskViolet]);
+        const tableTeal = formatTaskTable([taskTeal]);
         // Same project name, different hex — ANSI wrapping must differ
-        expect(tableSky).not.toBe(tableViolet);
+        expect(tableSky).not.toBe(tableTeal);
     });
 
     it('task with null projectColor falls back to theme project role (no chalk.hex call)', () => {

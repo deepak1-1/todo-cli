@@ -7,15 +7,15 @@ function e(chalkFn: (s: string) => string, ink: string): PaletteEntry {
     return { chalk: chalkFn as unknown as import('chalk').ChalkInstance, ink };
 }
 
-const CM_RED    = '#f38ba8';
-const CM_ORANGE = '#fab387'; // peach
-const CM_YELLOW = '#f9e2af';
-const CM_GREEN  = '#a6e3a1';
-const CM_TEAL   = '#94e2d5';
-const CM_BLUE   = '#89b4fa';
-const CM_MAUVE  = '#cba6f7';
-const CM_FG     = '#cdd6f4';
-const CM_MUTED  = '#6c7086';
+const CM_RED       = '#f38ba8';
+const CM_ORANGE    = '#fab387'; // peach
+const CM_YELLOW    = '#f9e2af';
+const CM_GREEN     = '#a6e3a1';
+const CM_TEAL      = '#94e2d5';
+const CM_BLUE      = '#89b4fa';
+const CM_SAPPHIRE  = '#74c7ec';
+const CM_FG        = '#cdd6f4';
+const CM_MUTED     = '#6c7086';
 
 export const catppuccinMochaTheme = {
     name: 'catppuccin-mocha',
@@ -35,7 +35,7 @@ export const catppuccinMochaTheme = {
 
             id: e(chalk.hex(CM_MUTED), CM_MUTED),
             ref: e(chalk.hex(CM_BLUE), CM_BLUE),
-            project: e(chalk.hex(CM_MAUVE), CM_MAUVE),
+            project: e(chalk.hex(CM_SAPPHIRE), CM_SAPPHIRE),
             tag: e(chalk.hex(CM_TEAL), CM_TEAL),
 
             dateOverdue: e(chalk.hex(CM_RED).bold, CM_RED),
@@ -49,14 +49,14 @@ export const catppuccinMochaTheme = {
             debug: e(chalk.hex(CM_MUTED), CM_MUTED),
 
             muted: e(chalk.hex(CM_MUTED), CM_MUTED),
-            accent: e(chalk.hex(CM_MAUVE), CM_MAUVE),
+            accent: e(chalk.hex(CM_SAPPHIRE), CM_SAPPHIRE),
             heading: e(chalk.hex(CM_FG).bold, CM_FG),
             tableBorder: e(chalk.hex(CM_MUTED), CM_MUTED),
-            tableHeader: e(chalk.hex(CM_MAUVE), CM_MAUVE),
+            tableHeader: e(chalk.hex(CM_SAPPHIRE), CM_SAPPHIRE),
             prompt: e(chalk.hex(CM_TEAL), CM_TEAL),
             cursor: e(chalk.hex(CM_MUTED), CM_MUTED),
 
-            title: e(chalk.hex(CM_MAUVE).bold, CM_MAUVE),
+            title: e(chalk.hex(CM_SAPPHIRE).bold, CM_SAPPHIRE),
             subtitle: e(chalk.hex(CM_BLUE), CM_BLUE),
             body: e(chalk.hex(CM_FG), CM_FG),
             panelBorder: e(chalk.hex(CM_MUTED), CM_MUTED),

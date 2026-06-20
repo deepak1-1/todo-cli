@@ -13,7 +13,7 @@ const N_YELLOW   = '#ebcb8b';
 const N_GREEN    = '#a3be8c';
 const N_CYAN     = '#88c0d0';
 const N_BLUE     = '#81a1c1';
-const N_MAGENTA  = '#b48ead';
+const N_TEAL     = '#3fa89a';
 const N_FG       = '#d8dee9';
 const N_MUTED    = '#4c566a';
 
@@ -35,7 +35,7 @@ export const nordTheme = {
 
             id: e(chalk.hex(N_MUTED), N_MUTED),
             ref: e(chalk.hex(N_BLUE), N_BLUE),
-            project: e(chalk.hex(N_MAGENTA), N_MAGENTA),
+            project: e(chalk.hex(N_TEAL), N_TEAL),
             tag: e(chalk.hex(N_CYAN), N_CYAN),
 
             dateOverdue: e(chalk.hex(N_RED).bold, N_RED),

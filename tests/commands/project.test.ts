@@ -52,11 +52,11 @@ afterEach(() => {
 describe('project create --color', () => {
     it('accepts a palette name and persists as hex', async () => {
         const { projectCommand } = await import('../../src/commands/project.js');
-        await projectCommand.parseAsync(['create', 'TestProject', '--color', 'violet'], { from: 'user' });
+        await projectCommand.parseAsync(['create', 'TestProject', '--color', 'mint'], { from: 'user' });
 
         const project = ctx.projectRepo.getByName('TestProject');
         expect(project).not.toBeNull();
-        expect(project!.color).toBe('#8b5cf6');
+        expect(project!.color).toBe('#2dd4bf');
     });
 
     it('sets exitCode EXIT.USAGE when --color is invalid', async () => {

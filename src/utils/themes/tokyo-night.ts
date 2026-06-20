@@ -7,15 +7,15 @@ function e(chalkFn: (s: string) => string, ink: string): PaletteEntry {
     return { chalk: chalkFn as unknown as import('chalk').ChalkInstance, ink };
 }
 
-const TN_RED     = '#f7768e';
-const TN_ORANGE  = '#ff9e64';
-const TN_YELLOW  = '#e0af68';
-const TN_GREEN   = '#9ece6a';
-const TN_CYAN    = '#7dcfff';
-const TN_BLUE    = '#7aa2f7';
-const TN_MAGENTA = '#bb9af7';
-const TN_FG      = '#a9b1d6';
-const TN_MUTED   = '#565f89';
+const TN_RED    = '#f7768e';
+const TN_ORANGE = '#ff9e64';
+const TN_YELLOW = '#e0af68';
+const TN_GREEN  = '#9ece6a';
+const TN_CYAN   = '#7dcfff';
+const TN_BLUE   = '#7aa2f7';
+const TN_TEAL   = '#73daca';
+const TN_FG     = '#a9b1d6';
+const TN_MUTED  = '#565f89';
 
 export const tokyoNightTheme = {
     name: 'tokyo-night',
@@ -35,7 +35,7 @@ export const tokyoNightTheme = {
 
             id: e(chalk.hex(TN_MUTED), TN_MUTED),
             ref: e(chalk.hex(TN_BLUE), TN_BLUE),
-            project: e(chalk.hex(TN_MAGENTA), TN_MAGENTA),
+            project: e(chalk.hex(TN_TEAL), TN_TEAL),
             tag: e(chalk.hex(TN_CYAN), TN_CYAN),
 
             dateOverdue: e(chalk.hex(TN_RED).bold, TN_RED),
