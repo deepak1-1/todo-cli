@@ -26,8 +26,8 @@ After `npm run build`, the CLI is executable as `./dist/index.js` (bin name `tod
 
 ## High-Level Architecture
 
-### Dual entry: subcommand CLI + AI chat
-`src/index.ts` registers ~25 commander subcommands. **Invoking `todo` with no subcommand (or `todo chat`) launches an Ink/React chat UI** (`src/chat/`) that parses natural language into an `Intent` and dispatches it through the same repositories the CLI commands use. The chat backend prefers the user's installed `claude` CLI and falls back to a local Llama-3 GGUF model via `node-llama-cpp`; the model JSON-schema-constrains output to the `Intent` shape declared in `src/chat/intent.ts`.
+### CLI entry point and MCP server
+`src/index.ts` registers ~25 commander subcommands. **Invoking `todo` with no subcommand shows help** (same convention as git/docker). The `todo mcp` subcommand starts a Model Context Protocol stdio server (`src/mcp/`) that exposes task CRUD tools so any external AI agent (Claude Code, Claude Desktop, Cursor) can drive todo-cli. `todo mcp --print-config` prints the paste-ready JSON config block for MCP clients. `todo chat` is a one-release deprecation shim that prints a pointer to `todo mcp` and exits 0.
 
 ### Core / storage / commands separation
 - `src/core/` — pure domain logic (types, filters, scheduler, timer math, dependency resolution). No I/O. Tests here should not touch SQLite.
@@ -41,7 +41,7 @@ When adding a schema change, append a new `NNN-name.ts` migration and register i
 - `src/integrations/jira/` and `src/integrations/github/` — concrete `IntegrationProvider` implementations consumed by `commands/jira.ts` and `commands/github.ts`.
 
 ### Bundling notes (tsup)
-`tsup.config.ts` marks `better-sqlite3`, `node-llama-cpp`, `ink`, `react`, and yoga as `external` (native or runtime-resolved), while `commander`, `chalk`, `chrono-node`, `date-fns`, `fuse.js`, `ora`, etc. are bundled (`noExternal`). New native or Ink-adjacent deps almost always need to be added to `external`.
+`tsup.config.ts` marks `better-sqlite3` as `external` (native binding). `@modelcontextprotocol/sdk`, `zod`, `commander`, `chalk`, `chrono-node`, `date-fns`, `fuse.js`, `conf`, etc. are bundled (`noExternal`). New native deps need to be added to `external`.
 
 ### Test layout
 Vitest tests live in `tests/` mirroring `src/` (`tests/core`, `tests/commands`, `tests/storage`, `tests/integrations`, `tests/utils`). For storage tests use `createTestDb()` from `src/storage/database.ts` to get an in-memory connection instead of the singleton. Coverage excludes `src/index.ts` and `src/tui/**`.
@@ -59,7 +59,7 @@ Five project-local agents are wired with skill bindings, a model assignment per 
 |---|---|---|
 | `arch` | **Opus** | Architecture, SOLID, layering, ADRs, refactor blast-radius |
 | `pm` | **Opus** | Feature scoping, requirements, bug triage, UX consistency |
-| `dev` | **Sonnet** | All implementation — commands, repos, migrations, TUI, chat, integrations |
+| `dev` | **Sonnet** | All implementation — commands, repos, migrations, MCP server, integrations |
 | `tester` | **Sonnet** | Vitest test writing, coverage gaps, edge-case generation |
 | `code-reviewer` | **Sonnet** | Final gate before merge — third independent regression sweep |
 
@@ -93,20 +93,18 @@ Five project-local agents are wired with skill bindings, a model assignment per 
 
 ## Skills (.claude/skills/)
 
-Twelve project-local skills, each as `<name>/SKILL.md`. Picked up automatically by the harness; agents reference them by `[[name]]`.
+Ten project-local skills, each as `<name>/SKILL.md`. Picked up automatically by the harness; agents reference them by `[[name]]`.
 
 | Skill | Use when |
 |---|---|
 | `commander-cli` | Adding/editing a CLI subcommand or flag in `src/commands/*` |
-| `ink-tui` | Editing `src/chat/components/*` or any future `src/tui/*` |
 | `better-sqlite3` | New SQL, repository method, transaction, or schema in `src/storage/*` |
 | `sqlite-migrations` | Any schema change — write + register a numbered migration |
-| `node-llama-cpp` | Touching `src/chat/model.ts`, `model-finder.ts`, `intent.ts`, `prompt.ts` |
 | `vitest-testing` | Writing tests under `tests/**` |
 | `tsup-bundling` | Adding/removing a dep, or editing `tsup.config.ts` (external/noExternal) |
-| `terminal-styling` | Any command emitting styled output (chalk, ora, figures, cli-table3) |
-| `jira-integration` | `src/integrations/jira/*` and `jira_pull`/`jira_push` intents |
-| `github-integration` | `src/integrations/github/*` and `github_pull`/`github_push` intents |
+| `terminal-styling` | Any command emitting styled output (chalk, figures, cli-table3) |
+| `jira-integration` | `src/integrations/jira/*` |
+| `github-integration` | `src/integrations/github/*` |
 | `npm-publishing` | Cutting a release or changing the bin/files surface |
 | `regression-sweep` | **Mandatory after every code change — see below** |
 
@@ -114,11 +112,11 @@ Twelve project-local skills, each as `<name>/SKILL.md`. Picked up automatically 
 
 | Agent | Skills it owns |
 |---|---|
-| `arch` | `regression-sweep`, `better-sqlite3`, `sqlite-migrations`, `commander-cli`, `ink-tui`, `node-llama-cpp`, `tsup-bundling` |
-| `pm` | `regression-sweep`, `commander-cli`, `ink-tui`, `terminal-styling`, `jira-integration`, `github-integration` |
-| `dev` | All twelve — chooses per layer touched |
+| `arch` | `regression-sweep`, `better-sqlite3`, `sqlite-migrations`, `commander-cli`, `tsup-bundling` |
+| `pm` | `regression-sweep`, `commander-cli`, `terminal-styling`, `jira-integration`, `github-integration` |
+| `dev` | All ten — chooses per layer touched |
 | `tester` | `vitest-testing`, `better-sqlite3`, `sqlite-migrations`, `regression-sweep` |
-| `code-reviewer` | All twelve — independently re-runs `regression-sweep` |
+| `code-reviewer` | All ten — independently re-runs `regression-sweep` |
 
 ## Verification protocol (non-negotiable)
 
@@ -131,8 +129,8 @@ Every code change runs the **`regression-sweep`** skill before being declared do
 Each pass covers four checks:
 
 - **Similar-issue search** — grep the codebase for the same *shape* of bug/anti-pattern (not the literal text). Fix all twins in the same commit or ticket them explicitly.
-- **No-broken-flow** — `npm run typecheck && npm run lint && npm test && npm run build`, then smoke at least `todo --help`, `todo list`, and one command touching the changed module. For every CLI / TUI / chat path that touches the changed module, state explicitly whether it still works.
-- **No-new-bug audit** — grep the diff for: new `any`, new `console.log`, new SQL interpolation, new empty catches, new top-level `ink`/`node-llama-cpp` imports, new `process.exit` outside `src/index.ts`, new dep missing from `tsup.config.ts` `external`/`noExternal`, new migration not registered in `runner.ts`, new command not registered in `src/index.ts`.
+- **No-broken-flow** — `npm run typecheck && npm run lint && npm test && npm run build`, then smoke at least `todo --help`, `todo list`, and one command touching the changed module. For every CLI / MCP path that touches the changed module, state explicitly whether it still works.
+- **No-new-bug audit** — grep the diff for: new `any`, new `console.log`, new SQL interpolation, new empty catches, new top-level `ink`/`node-llama-cpp` imports (both removed — any reintroduction is a regression), new `process.exit` outside `src/index.ts`, new dep missing from `tsup.config.ts` `external`/`noExternal`, new migration not registered in `runner.ts`, new command not registered in `src/index.ts`.
 - **No-dead-code** — anything orphaned by the change is removed in the same commit (unused functions, dangling imports, removed-column references, commented-out blocks, drive-by `// TODO` without ticket, `_unused` renames).
 - **Double-verify trace** — walk one happy path and one error path top-to-bottom through every layer (CLI/intent → handler → core → repo → SQL → output).
 

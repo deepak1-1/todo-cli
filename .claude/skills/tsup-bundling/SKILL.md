@@ -11,23 +11,19 @@ description: tsup config for this CLI - external vs noExternal, ESM-only, native
 - `splitting: false`, `dts: false`. Don't enable splitting — it breaks the single-file bin contract.
 
 ## Externals (must remain external)
-- `better-sqlite3` — native binding, can't bundle.
-- `node-llama-cpp` — native + dynamic GGUF loading.
-- `ink`, `ink-text-input`, `ink-spinner`, `react`, `react/jsx-runtime`, `react/jsx-dev-runtime`, `react-devtools-core`, `react-reconciler` — Ink's render pipeline resolves these at runtime.
-- `yoga-wasm-web`, `yoga-layout` — WASM, loaded dynamically by Ink.
+- `better-sqlite3` — native binding, can't bundle. This is the only external.
 
-If you add anything in those families, add it to `external`.
+If you add anything with a native binding or runtime path-based loading, add it to `external`.
 
 ## noExternal (bundle into dist)
-`chalk`, `commander`, `chrono-node`, `cli-table3`, `date-fns`, `figures`, `fuse.js`, `ora`, `conf`, `terminal-link`. Reason: they're pure JS, small, and bundling avoids `node_modules` shipping with the bin.
+`@modelcontextprotocol/sdk`, `zod`, `chalk`, `commander`, `chrono-node`, `cli-table3`, `date-fns`, `figures`, `fuse.js`, `conf`. Reason: they're pure JS, small, and bundling avoids `node_modules` shipping with the bin.
 
 If you add a pure-JS dep that's safe to bundle, add it here. Otherwise it ships unbundled and the bin breaks for users without it installed.
 
 ## Decision tree for a new dependency
 1. Does it ship a `.node` / native binding? → `external`.
 2. Does it dynamically `import()` or `require()` based on file paths? → `external`.
-3. Is it a peer of Ink/React? → `external`.
-4. Otherwise → `noExternal`.
+3. Otherwise → `noExternal`.
 
 ## Verification
 After editing `tsup.config.ts` or adding a dep:

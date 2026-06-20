@@ -46,7 +46,7 @@ const program = new Command();
 
 program
     .name('todo')
-    .description('AI-powered task management for your terminal')
+    .description('Terminal task management for developers')
     .version('1.0.0', '-V, --version')
     .option('--no-color', 'Disable colored output')
     .option('-q, --quiet', 'Minimal output')
@@ -97,19 +97,30 @@ program.addCommand(pluginCommand);
 program.addCommand(jiraCommand);
 program.addCommand(githubCommand);
 
-// Chat command (explicit)
+// Deprecation shim — points users to `todo mcp`
 program
     .command('chat')
-    .description('Open interactive AI chat mode')
-    .action(async () => {
-        const { startChat } = await import('./chat/index.js');
-        await startChat();
+    .description('(deprecated) use `todo mcp` to connect your AI agent')
+    .allowUnknownOption()
+    .action(() => {
+        process.stderr.write('todo chat has moved — run `todo mcp` and connect your AI agent (see README).\n');
+        process.exit(0);
     });
 
-// Skip the DB only for version output and the bare chat launch. --help/-h loads
-// the registry so dynamic verb commands are listed in the top-level help.
+// MCP server command
+program
+    .command('mcp')
+    .description('Run an MCP stdio server for AI agent integration')
+    .option('--print-config', 'Print paste-ready MCP client config JSON and exit')
+    .option('--allow-delete', 'Allow hard-delete via todo_delete_task tool (archives by default)')
+    .action(async (opts) => {
+        const { runMcpServer } = await import('./mcp/index.js');
+        await runMcpServer({ printConfig: !!opts.printConfig, allowDelete: !!opts.allowDelete });
+    });
+
+// Skip dynamic registration for version flags and mcp (stdout redirect must install first).
 const firstArg = process.argv[2];
-const skipDynamic = !firstArg || firstArg === '--version' || firstArg === '-V';
+const skipDynamic = firstArg === '--version' || firstArg === '-V' || firstArg === 'mcp';
 
 if (!skipDynamic) {
     // Dynamically register verb commands and bulk status subcommands from the status registry.
@@ -133,10 +144,9 @@ if (!skipDynamic) {
     }
 }
 
-// Default action (no subcommand) — Launch AI chat mode.
-program.action(async () => {
-    const { startChat } = await import('./chat/index.js');
-    await startChat();
+// Default action (no subcommand) — show help.
+program.action(() => {
+    program.help();
 });
 
 // Cleanup on exit.

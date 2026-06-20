@@ -188,6 +188,17 @@ describe('ProjectRepository', () => {
         expect(project.name).toBe('Gamma');
         expect(project.description).toBe('');
     });
+
+    it('getOrCreate throws on empty/whitespace name and inserts nothing', () => {
+        expect(() => projectRepo.getOrCreate('')).toThrow('Project name cannot be empty');
+        expect(() => projectRepo.getOrCreate('   ')).toThrow('Project name cannot be empty');
+        expect(projectRepo.list().some(p => p.name.trim() === '')).toBe(false);
+    });
+
+    it('getOrCreate trims surrounding whitespace from the name', () => {
+        const project = projectRepo.getOrCreate('  Delta  ');
+        expect(project.name).toBe('Delta');
+    });
 });
 
 describe('TagRepository', () => {
@@ -217,6 +228,41 @@ describe('TagRepository', () => {
         const remaining = tagRepo.getTaskTags(task.id);
         expect(remaining).toHaveLength(2);
         expect(remaining).not.toContain('b');
+    });
+
+    it('getOrCreate throws on empty string and inserts nothing', () => {
+        expect(() => tagRepo.getOrCreate('')).toThrow('Tag name cannot be empty');
+        expect(tagRepo.list()).toHaveLength(0);
+    });
+
+    it('getOrCreate throws on whitespace-only string and inserts nothing', () => {
+        expect(() => tagRepo.getOrCreate('   ')).toThrow('Tag name cannot be empty');
+        expect(tagRepo.list()).toHaveLength(0);
+    });
+
+    it('getOrCreate trims whitespace and stores the trimmed name', () => {
+        const tag = tagRepo.getOrCreate('  backend  ');
+        expect(tag.name).toBe('backend');
+        expect(tagRepo.list()).toHaveLength(1);
+    });
+
+    it('addTaskTags throws and inserts nothing when a name is empty', () => {
+        const task = taskRepo.create({ title: 'Task' });
+        expect(() => tagRepo.addTaskTags(task.id, [''])).toThrow('Tag name cannot be empty');
+        expect(tagRepo.getTaskTags(task.id)).toHaveLength(0);
+    });
+
+    it('setTaskTags throws and inserts nothing when a name is whitespace-only', () => {
+        const task = taskRepo.create({ title: 'Task' });
+        expect(() => tagRepo.setTaskTags(task.id, ['  '])).toThrow('Tag name cannot be empty');
+        expect(tagRepo.getTaskTags(task.id)).toHaveLength(0);
+    });
+
+    it('addTaskTags rejects mixed valid/empty list atomically — no partial insert', () => {
+        const task = taskRepo.create({ title: 'Task' });
+        expect(() => tagRepo.addTaskTags(task.id, ['backend', ''])).toThrow('Tag name cannot be empty');
+        // Transaction rolls back: backend must NOT have been persisted
+        expect(tagRepo.getTaskTags(task.id)).toHaveLength(0);
     });
 });
 

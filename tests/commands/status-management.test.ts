@@ -126,7 +126,7 @@ describe('RESERVED_VERBS constraint', () => {
         // Spot-check known reserved ones
         ['add', 'list', 'ls', 'show', 'edit', 'rm', 'delete', 'bulk', 'project',
             'tag', 'stats', 'undo', 'history', 'config', 'timer', 'track',
-            'integrate', 'plugin', 'jira', 'gh', 'chat', 'status', 'context',
+            'integrate', 'plugin', 'jira', 'gh', 'mcp', 'chat', 'status', 'context',
             'help', 'version',
         ].forEach(v => expect(RESERVED_VERBS.has(v)).toBe(true));
     });

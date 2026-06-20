@@ -46,4 +46,4 @@ Add an index in a new migration whenever a `WHERE`/`ORDER BY` column is hot (sta
 
 ## What lives where
 - All raw SQL: `src/storage/repositories/*.repo.ts`.
-- No SQL in `src/commands/`, `src/core/`, `src/integrations/`, `src/tui/`, `src/chat/`.
+- No SQL in `src/commands/`, `src/core/`, `src/integrations/`, `src/tui/`.

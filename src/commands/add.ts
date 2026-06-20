@@ -107,7 +107,7 @@ Examples:
             tags: opts.tag,
         });
 
-        // Set dependencies (CLI-only; not exposed via chat Intent)
+        // Set dependencies (CLI-only; not exposed via MCP tools)
         if (opts.depends) {
             const depIds = parseIdList(opts.depends);
             for (const depId of depIds) {

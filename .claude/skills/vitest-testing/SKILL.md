@@ -57,7 +57,7 @@ Mock `Date.now()` via `vi.useFakeTimers({ shouldAdvanceTime: true })`. Do not wr
 - Migrations: implicitly covered by the `beforeEach` reset.
 
 ## What NOT to test
-- Ink/React components (`src/tui/**`, `src/chat/components/**`).
+- Ink/React components (`src/tui/**`).
 - `commander` parsing internals.
 - `better-sqlite3` engine internals.
 - LLM call output (mock at the boundary).

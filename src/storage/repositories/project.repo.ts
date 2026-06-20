@@ -47,8 +47,11 @@ export class ProjectRepository {
     }
 
     /** Find project by name, creating it with optional description if absent. */
+    /** Get or create a project by name. Trims whitespace; throws if the result is empty. */
     getOrCreate(name: string, opts?: { description?: string }): Project {
-        return this.getByName(name) ?? this.create({ name, description: opts?.description });
+        const trimmed = name.trim();
+        if (!trimmed) throw new Error('Project name cannot be empty');
+        return this.getByName(trimmed) ?? this.create({ name: trimmed, description: opts?.description });
     }
 
     list(includeArchived = false): Project[] {

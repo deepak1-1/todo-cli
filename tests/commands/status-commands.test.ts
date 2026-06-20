@@ -153,3 +153,30 @@ describe('regression: edit command does NOT accept --status option', () => {
         expect(typeof editMod.executeEdit).toBe('function');
     });
 });
+
+// ──────────────────────────────────────────────
+// applyEdit — empty-title validation
+// ──────────────────────────────────────────────
+describe('applyEdit — rejects blank title via validateUpdateInput', () => {
+    it('throws TaskValidationError on empty string title', () => {
+        const task = ctx.taskRepo.create({ title: 'Original', priority: 'medium' });
+        expect(() => applyEdit(ctx, task.id, { title: '' })).toThrow('Task title cannot be empty');
+    });
+
+    it('throws TaskValidationError on whitespace-only title', () => {
+        const task = ctx.taskRepo.create({ title: 'Original', priority: 'medium' });
+        expect(() => applyEdit(ctx, task.id, { title: '   ' })).toThrow('Task title cannot be empty');
+    });
+
+    it('accepts a normal title update without error', () => {
+        const task = ctx.taskRepo.create({ title: 'Original', priority: 'medium' });
+        const result = applyEdit(ctx, task.id, { title: 'Renamed' });
+        expect(result.task.title).toBe('Renamed');
+    });
+
+    it('accepts a status-only edit (no title) without error', () => {
+        const task = ctx.taskRepo.create({ title: 'No title change', priority: 'medium' });
+        const result = applyEdit(ctx, task.id, { status: 'in_progress' });
+        expect(result.task.status).toBe('in_progress');
+    });
+});

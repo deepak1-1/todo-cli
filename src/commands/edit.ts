@@ -6,7 +6,7 @@ import { Command } from 'commander';
 import { getContext } from './context.js';
 import { theme } from '../utils/theme.js';
 import { getHookManager } from '../plugins/hook-manager.js';
-import { handleRecurringCompletion } from '../core/task.js';
+import { handleRecurringCompletion, validateUpdateInput } from '../core/task.js';
 import { parseDate } from '../utils/date.js';
 import { success, error, formatStatus, parseId } from '../utils/format.js';
 import { logWarn } from '../utils/logger.js';
@@ -30,6 +30,9 @@ export function applyEdit(
     const prevState = JSON.stringify(task);
     const defs = ctx.statusRepo.list();
     const targetStatus = opts.status ? findByKeyOrVerb(defs, opts.status)?.key : undefined;
+
+    // Validate title + priority before building changes; throws TaskValidationError on bad input
+    validateUpdateInput({ title: opts.title, priority: opts.priority as TaskPriority | undefined });
 
     const changes: Record<string, unknown> = {};
 
@@ -159,7 +162,7 @@ export function executeEdit(id: number, opts: EditOptions, { silent = false, jso
 
     const { task: updated, recurring: recurringInfo } = result;
 
-    // Handle dependencies (CLI-only; not exposed via chat Intent)
+    // Handle dependencies (CLI-only; not exposed via MCP tools)
     if (opts.depends && opts.depends.length > 0) {
         handleDependencyOption(id, opts.depends, 'depends', ctx, json);
     }

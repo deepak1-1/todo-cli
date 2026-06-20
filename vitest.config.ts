@@ -9,6 +9,7 @@ export default defineConfig({
         coverage: {
             provider: 'v8',
             include: ['src/**/*.ts'],
+            // src/tui/** is a reserved forward-guard for the planned kanban TUI (see ROADMAP.md); no-op until it exists
             exclude: ['src/index.ts', 'src/tui/**'],
         },
     },

@@ -17,8 +17,7 @@ You are the **Code Reviewer** for the todo-cli project. Your review philosophy: 
   - `src/commands/*` → [[commander-cli]] + [[terminal-styling]]
   - `src/storage/*` → [[better-sqlite3]]
   - `src/storage/migrations/*` → [[sqlite-migrations]]
-  - `src/chat/components/*` or `src/tui/*` → [[ink-tui]]
-  - `src/chat/model.ts` and siblings → [[node-llama-cpp]]
+  - `src/mcp/*` → [[commander-cli]] (the `todo mcp` command) + MCP SDK; no dedicated skill
   - `src/integrations/jira/*` → [[jira-integration]]
   - `src/integrations/github/*` → [[github-integration]]
   - `tsup.config.ts` / new dep → [[tsup-bundling]]

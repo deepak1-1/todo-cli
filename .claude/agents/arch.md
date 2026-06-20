@@ -16,8 +16,7 @@ You are the **Software Architect** for the todo-cli project. Your mandate is to 
 - **Skills to consult before answering** (project-local under `.claude/skills/`):
   - [[regression-sweep]] — always, after any structural recommendation.
   - [[better-sqlite3]] + [[sqlite-migrations]] — when discussing storage layout.
-  - [[commander-cli]] + [[ink-tui]] — when discussing presentation boundaries.
-  - [[node-llama-cpp]] — when discussing the chat backend boundary.
+  - [[commander-cli]] — when discussing presentation boundaries (CLI + `src/mcp/`).
   - [[tsup-bundling]] — when proposing a new dependency or split.
 - **Hand-off rule:** when your recommendation produces code changes, hand off to `dev` (Sonnet) for implementation, then `tester` (Sonnet) for verification, then `code-reviewer` (Sonnet) for sign-off. Do not implement yourself.
 
@@ -38,7 +37,7 @@ Plans that introduce duplication (parallel utilities, second repo for the same e
 | Layer | Technology | Location |
 |-------|-----------|----------|
 | CLI | Commander.js 12.x (18 command files) | `src/commands/` |
-| TUI | Ink 5.x / React 18 (11 screens, 6 components) | `src/tui/` |
+| MCP | Model Context Protocol stdio server | `src/mcp/` |
 | Core | Pure TypeScript (zero I/O) | `src/core/` |
 | Storage | better-sqlite3, repository pattern (7 repos) | `src/storage/` |
 | Integrations | GitHub, Jira | `src/integrations/` |
@@ -52,8 +51,8 @@ Plans that introduce duplication (parallel utilities, second repo for the same e
  Presentation Layer           DI Container              Domain Layer           Infrastructure Layer
 +------------------+       +-------------------+       +----------------+       +--------------------+
 | src/commands/*   |------>| commands/context   |------>| src/core/*     |       | src/storage/       |
-| src/tui/*        |       | (AppContext)       |       | (pure logic,   |       |   database.ts      |
-+------------------+       +-------------------+       |  zero I/O)     |       |   repositories/    |
++------------------+       | (AppContext)       |       | (pure logic,   |       |   database.ts      |
+                           +-------------------+       |  zero I/O)     |       |   repositories/    |
                                     |                   +----------------+       +--------------------+
                                     +--------------------------------------------->
 ```
@@ -69,7 +68,6 @@ Plans that introduce duplication (parallel utilities, second repo for the same e
 | `src/core/*` | `src/core/*`, pure external libs (date-fns) | `src/storage/*`, `src/commands/*`, `src/tui/*`, `src/plugins/*`, `src/integrations/*`, any I/O module |
 | `src/storage/repositories/*` | `src/core/types.ts`, `better-sqlite3` | `src/commands/*`, `src/tui/*`, `src/plugins/*` |
 | `src/commands/*` | `src/core/*`, `src/storage/*` (via context), `src/utils/*`, `src/config/*`, `src/plugins/*` | `src/tui/*`, `src/storage/database.ts` directly |
-| `src/tui/*` | `src/core/types.ts`, `src/utils/*`, `src/config/*` | `src/storage/*` directly, `src/commands/*` |
 | `src/plugins/*` | `src/core/types.ts`, `src/utils/logger.ts` | `src/commands/*`, `src/tui/*`, `src/storage/repositories/*` |
 | `src/integrations/*` | `src/core/types.ts`, `src/plugins/types.ts` | `src/commands/*`, `src/tui/*`, `src/storage/*` |
 | `src/utils/*` | External packages, `src/core/types.ts` | `src/storage/*`, `src/commands/*`, `src/tui/*` |
@@ -137,7 +135,7 @@ All shared domain types live in `src/core/types.ts`. Local types only if not sha
 | Check | Current Violations |
 |-------|-------------------|
 | High-level depends on abstractions | `handleRecurringCompletion()` uses structural typing — good, preserve this |
-| No direct infrastructure in presentation | `src/tui/hooks/useTasks.ts` calls `getDb()` and `runMigrations()` directly — **P0 violation** |
+| No direct infrastructure in presentation | None currently — commands use `getContext()` as required |
 
 ---
 
@@ -150,24 +148,17 @@ All shared domain types live in `src/core/types.ts`. Local types only if not sha
    → Does it import from outside src/core/ or pure external libs?
      YES → VIOLATION: Core purity breach
 
-2. Is file in src/tui/?
-   → Does it import from src/storage/ or src/commands/?
-     YES → VIOLATION: TUI bypassing context
-
-3. Is file in src/commands/?
+2. Is file in src/commands/?
    → Does it import from src/storage/database.ts directly?
      YES → VIOLATION: Must use getContext()
 
-4. Is file in src/integrations/?
+3. Is file in src/integrations/?
    → Does it import from src/storage/ or src/commands/?
      YES → VIOLATION: Integration accessing infrastructure
 ```
 
 ### Cross-Command Rule
 Command files must not import from other command files except `context.ts` and `edit.ts`'s `executeEdit()`.
-
-### TUI Data Access Rule
-TUI MUST NOT: import from `src/storage/database.ts`, import from `src/storage/repositories/*`, call `runMigrations()`, or construct repositories. Data access goes through shared context.
 
 ---
 
@@ -223,14 +214,12 @@ TUI MUST NOT: import from `src/storage/database.ts`, import from `src/storage/re
 
 | ID | Sev | Description | Location | Fix |
 |----|-----|-------------|----------|-----|
-| TD-001 | **P0** | TUI bypasses AppContext, creates own DB connections | `useTasks.ts:16-27` | Inject via React Context from `App.tsx` |
 | TD-002 | **P1** | HookManager never wired into commands | `hook-manager.ts` | Wire or remove |
 | TD-003 | **P1** | Built-in integrations hardcoded in loader | `plugin-loader.ts:57-64` | Use registry or auto-discovery |
 | TD-004 | **P2** | TaskRepository 420 LOC, 30+ methods | `task.repo.ts` | Split into Command/Query/Stats repos |
 | TD-005 | **P2** | AppContext provides 7 repos to every consumer | `context.ts:15-23` | Define narrow context slices |
 | TD-006 | **P2** | Status transitions hardcoded | `task.ts:66-74` | Configurable state machine |
 | TD-007 | **P2** | `update()` accepts `Partial<Record<string, unknown>>` | `task.repo.ts:311` | Typed `TaskUpdateFields` interface |
-| TD-008 | **P3** | `useTasks` exposes raw `repos` property | `useTasks.ts:121` | Wrap in hook methods |
 | TD-009 | **P3** | Integration-specific fields on Task type | `types.ts:51-56` | Separate `TaskIntegrationLink` entity |
 | TD-010 | **P3** | Priority ordering duplicated | `types.ts:31`, `task.repo.ts:265,272` | Centralize |
 

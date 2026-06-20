@@ -17,12 +17,14 @@ const mapRow = makeMapper<TagRow, Tag>({
 export class TagRepository {
     constructor(private db: Database.Database) {}
 
-    /** Get or create a tag by name */
+    /** Get or create a tag by name. Trims whitespace; throws if the result is empty. */
     getOrCreate(name: string): Tag {
-        const existing = this.getByName(name);
+        const trimmed = name.trim();
+        if (!trimmed) throw new Error('Tag name cannot be empty');
+        const existing = this.getByName(trimmed);
         if (existing) return existing;
 
-        const result = this.db.prepare('INSERT INTO tags (name) VALUES (?)').run(name);
+        const result = this.db.prepare('INSERT INTO tags (name) VALUES (?)').run(trimmed);
         return this.getById(Number(result.lastInsertRowid))!;
     }
 

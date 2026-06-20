@@ -1,26 +1,18 @@
 # todo-cli
 
-**Interactive terminal task management for developers**
+**Terminal task management for developers**
 
-A powerful, feature-rich CLI task manager designed for developers. Manage tasks directly from your terminal with a beautiful TUI, Pomodoro timer, integrations with your favorite tools, and an extensible plugin system.
+A powerful CLI task manager designed for developers. Manage tasks directly from your terminal with a Pomodoro timer, integrations with your favourite tools, an extensible plugin system, and native AI-agent support via the Model Context Protocol.
 
 ## Features
 
 ### Core Features
 - Create, update, and delete tasks
-- Organize tasks with tags and categories
+- Organize tasks with tags and projects
 - Task search and advanced filtering
 - Due date and deadline tracking
-- Task priority levels (Low, Medium, High, Critical)
+- Task priority levels (low, medium, high, urgent)
 - Detailed task descriptions and notes
-
-### Interactive Terminal UI
-- Modern TUI built with Ink and React
-- 11 purpose-built screens for different workflows
-- 6 theme options: Dark, Light, Ocean, Forest, Dracula, Nord
-- Vim-style navigation and keybindings
-- Real-time filtering and sorting
-- Responsive design that works in any terminal
 
 ### Integrations
 Connect todo-cli with your favorite tools:
@@ -78,11 +70,6 @@ Mark task as done:
 todo done <task-id>
 ```
 
-Start the interactive TUI:
-```bash
-todo
-```
-
 Search tasks:
 ```bash
 todo ls --search "keyword"
@@ -93,31 +80,34 @@ View task details:
 todo show <task-id>
 ```
 
-## Interactive TUI
+## Use with your AI agent (MCP)
 
-Launch the interactive terminal UI for the best experience:
+todo-cli includes a built-in Model Context Protocol stdio server. Any MCP-compatible AI agent (Claude Code, Claude Desktop, Cursor) can read and write your tasks directly.
 
+### Quick setup
+
+1. Start the server and print the config:
 ```bash
-todo
+todo mcp --print-config
 ```
 
-### Navigation
-- **j/k** - Move down/up in lists
-- **h/l** - Navigate between screens
-- **Enter** - Select/confirm
-- **q** - Quit
-- **/** - Search
-- **:w** - Save changes
-- **:q** - Quit
+2. Paste the printed JSON into your MCP client's config file. The `--print-config` output already contains the correct absolute path to your installed binary — no editing required.
 
-### Screens
-1. **Dashboard** - Task overview with urgent/due/in-progress
-2. **List** - Browsable task list with sorting
-3. **Board** - Kanban-style columns
-4. **Search** - Advanced search and filtering
-5. **Detail** - Full task information
-6. **Project** - Tasks grouped by project
-7. **Stats** - Productivity metrics
+3. Restart your AI agent. It will now have access to the following tools:
+   - `todo_add_task` — create a task
+   - `todo_update_task` — edit title, priority, due date, tags, project
+   - `todo_set_status` — change task status
+   - `todo_delete_task` — archive (soft-delete, undoable via `todo undo`)
+   - `todo_list_tasks` — list with filters
+   - `todo_get_task` — get a single task with full relations
+
+### Safety
+
+By default `todo_delete_task` **archives** tasks (recoverable with `todo undo`). Permanent hard-delete requires starting the server with `--allow-delete`:
+
+```bash
+todo mcp --allow-delete
+```
 
 ## Configuration
 
@@ -152,11 +142,13 @@ Configure todo-cli via `~/.todo-cli/config.json`:
 
 ### Connecting an Integration
 
-1. Open todo-cli TUI
-2. Navigate to Integrations screen
-3. Select an integration to configure
-4. Enter your credentials
-5. Authorize and sync
+```bash
+todo integrate          # list available integrations and their status
+todo jira setup         # configure Jira credentials
+todo gh setup           # configure GitHub credentials
+```
+
+Once configured, run `todo jira sync` or `todo gh sync` to pull issues into your task list.
 
 ### Available Integrations
 
@@ -167,7 +159,7 @@ Configure todo-cli via `~/.todo-cli/config.json`:
 
 ## Plugin Development
 
-Extend todo-cli by creating custom plugins. See [Plugin Development Guide](./docs/PLUGIN_DEVELOPMENT.md) for detailed instructions.
+Extend todo-cli by creating custom plugins that implement the `IntegrationProvider` interface.
 
 ### Quick Example
 
@@ -188,35 +180,14 @@ export class MyServicePlugin implements IntegrationProvider {
 }
 ```
 
-## Documentation
-
-- [API Reference](./docs/API.md)
-- [Plugin Development Guide](./docs/PLUGIN_DEVELOPMENT.md)
-- [Architecture Overview](./docs/ARCHITECTURE.md)
-- [CLI Reference](./docs/CLI.md)
-
-## Contributing
-
-We welcome contributions! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines on:
-- Setting up your development environment
-- Project structure
-- Creating plugins
-- PR guidelines
-- Code style
-
 ## Support
 
 - GitHub Issues: [Report bugs or request features](https://github.com/yourusername/todo-cli/issues)
-- Documentation: [docs/](./docs/)
 - Discussions: [GitHub Discussions](https://github.com/yourusername/todo-cli/discussions)
 
 ## License
 
 This project is licensed under the MIT License - see [LICENSE](./LICENSE) for details.
-
-## Changelog
-
-See [CHANGELOG.md](./CHANGELOG.md) for version history and updates.
 
 ---
 

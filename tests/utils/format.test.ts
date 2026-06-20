@@ -17,6 +17,8 @@ import {
     parseId,
     parseIds,
     parseIntOption,
+    priorityColors,
+    statusChalkFn,
 } from '../../src/utils/format.js';
 import type { TaskWithRelations } from '../../src/core/types.js';
 
@@ -443,6 +445,62 @@ describe('parseIds', () => {
 
     it('should handle whitespace around IDs', () => {
         expect(parseIds(' 1 , 2 , 3 ')).toEqual([1, 2, 3]);
+    });
+});
+
+describe('priorityColors', () => {
+    it('urgent returns a callable that includes ANSI or the word urgent', () => {
+        const result = priorityColors.urgent('urgent');
+        expect(result).toContain('urgent');
+    });
+
+    it('high returns a callable that includes the input text', () => {
+        const result = priorityColors.high('high');
+        expect(result).toContain('high');
+    });
+
+    it('medium returns a callable that includes the input text', () => {
+        const result = priorityColors.medium('medium');
+        expect(result).toContain('medium');
+    });
+
+    it('low returns a callable that includes the input text', () => {
+        const result = priorityColors.low('low');
+        expect(result).toContain('low');
+    });
+
+    it('each key returns a function', () => {
+        expect(typeof priorityColors.urgent).toBe('function');
+        expect(typeof priorityColors.high).toBe('function');
+        expect(typeof priorityColors.medium).toBe('function');
+        expect(typeof priorityColors.low).toBe('function');
+    });
+});
+
+describe('statusChalkFn', () => {
+    it('returns a callable for a known status key', () => {
+        const fn = statusChalkFn('done');
+        expect(typeof fn).toBe('function');
+        expect(fn('done')).toContain('done');
+    });
+
+    it('returns an identity-like function for an unknown status', () => {
+        const fn = statusChalkFn('unknown_xyz');
+        expect(fn('raw text')).toContain('raw text');
+    });
+
+    it('uses the provided StatusDef color when defs are supplied', () => {
+        const defs = [{ key: 'custom', label: 'Custom', icon: '★', color: 'green', sortOrder: 10, verb: 'customize', completes: false, archives: false, isBuiltin: false }];
+        const fn = statusChalkFn('custom', defs);
+        expect(typeof fn).toBe('function');
+        // Green chalk — output must contain the text at minimum
+        expect(fn('custom')).toContain('custom');
+    });
+
+    it('falls back to builtin map when defs do not contain the key', () => {
+        const defs = [{ key: 'other', label: 'Other', icon: '?', color: 'gray', sortOrder: 99, verb: 'other', completes: false, archives: false, isBuiltin: false }];
+        const fn = statusChalkFn('todo', defs);
+        expect(fn('todo')).toContain('todo');
     });
 });
 

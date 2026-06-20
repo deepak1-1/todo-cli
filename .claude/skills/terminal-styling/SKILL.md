@@ -8,7 +8,7 @@ description: chalk, ora, figures, cli-table3 usage with TTY / NO_COLOR / --no-co
 ## Use the project helpers, not chalk directly
 `src/utils/format.ts` exports `success`, `error`, `formatTaskDetail`, etc. Commands should import these, not call `chalk.red(...)` inline. This keeps theming in one place.
 
-Direct `chalk` use is fine in `src/utils/format.ts` itself and in `src/chat/executor.ts` (output formatter is the responsibility surface).
+Direct `chalk` use is fine in `src/utils/format.ts` itself (output formatter is the responsibility surface).
 
 ## Honor user opt-outs
 - `--no-color` (Commander global option in `src/index.ts`).
@@ -26,7 +26,7 @@ const colorOn = process.stdout.isTTY && !process.env.NO_COLOR && opts.color !== 
 
 ## Tables
 - `cli-table3` for fixed columnar output (CLI list view).
-- For width-variable output in chat, use the `formatPlainTable` helper already in `src/chat/executor.ts` — it has no borders and survives narrow terminals.
+- For width-variable output, implement a plain table without borders that survives narrow terminals.
 
 ## Figures / symbols
 `figures` resolves to unicode on capable terminals, ASCII fallback otherwise. Use it for ✓ / ✗ / ▸ — do not hardcode unicode.
