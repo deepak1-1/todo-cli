@@ -31,7 +31,6 @@ import { timerCommand } from './commands/timer.js';
 
 // Plugin & Integration commands
 import { integrateCommand } from './commands/integrate.js';
-import { pluginCommand } from './commands/plugin.js';
 import { jiraCommand } from './commands/jira.js';
 import { githubCommand } from './commands/github.js';
 
@@ -91,21 +90,10 @@ program.addCommand(timerCommand);
 
 // Plugin system
 program.addCommand(integrateCommand);
-program.addCommand(pluginCommand);
 
 // Integrations
 program.addCommand(jiraCommand);
 program.addCommand(githubCommand);
-
-// Deprecation shim — points users to `todo mcp`
-program
-    .command('chat')
-    .description('(deprecated) use `todo mcp` to connect your AI agent')
-    .allowUnknownOption()
-    .action(() => {
-        process.stderr.write('todo chat has moved — run `todo mcp` and connect your AI agent (see README).\n');
-        process.exit(0);
-    });
 
 // MCP server command
 program

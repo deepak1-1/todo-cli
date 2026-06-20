@@ -34,7 +34,6 @@ const mockCtx = {
     taskRepo: {} as never,
     projectRepo: {} as never,
     tagRepo: {} as never,
-    timerRepo: {} as never,
     actionLog: {} as never,
     depRepo: {} as never,
     trackingRepo: {} as never,

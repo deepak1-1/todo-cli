@@ -202,8 +202,6 @@ describe('githubProvider.push', () => {
         jiraKey: null,
         jiraId: null,
         githubRef: 'acme/repo#5',
-        gitlabRef: null,
-        linearRef: null,
         syncHash: null,
         lastSyncedAt: null,
         createdAt: '2026-01-01 00:00:00',
@@ -298,8 +296,8 @@ describe('githubProvider.mapToRemote', () => {
         const task: Task = {
             id: 1, title: 'A task', description: 'Body text', status: 'pending',
             priority: 'low', projectId: null, dueDate: null, recurrence: null,
-            timeSpent: 0, jiraKey: null, jiraId: null, githubRef: null, gitlabRef: null,
-            linearRef: null, syncHash: null, lastSyncedAt: null,
+            timeSpent: 0, jiraKey: null, jiraId: null, githubRef: null,
+            syncHash: null, lastSyncedAt: null,
             createdAt: '2026-01-01 00:00:00', updatedAt: '2026-01-01 00:00:00',
             completedAt: null, archivedAt: null,
         };

@@ -75,39 +75,6 @@ export class HookManager {
         }
     }
 
-    async onTimerStart(task: Task): Promise<void> {
-        const registry = getRegistry();
-        const plugins = registry.getEnabled();
-
-        for (const plugin of plugins) {
-            if (!plugin.provider.hooks?.onTimerStart) {
-                continue;
-            }
-
-            try {
-                await plugin.provider.hooks.onTimerStart(task);
-            } catch (err: unknown) {
-                logger.logWarn(`Plugin ${plugin.manifest.name} error in onTimerStart: ${err instanceof Error ? err.message : String(err)}`);
-            }
-        }
-    }
-
-    async onTimerComplete(task: Task, duration: number): Promise<void> {
-        const registry = getRegistry();
-        const plugins = registry.getEnabled();
-
-        for (const plugin of plugins) {
-            if (!plugin.provider.hooks?.onTimerComplete) {
-                continue;
-            }
-
-            try {
-                await plugin.provider.hooks.onTimerComplete(task, duration);
-            } catch (err: unknown) {
-                logger.logWarn(`Plugin ${plugin.manifest.name} error in onTimerComplete: ${err instanceof Error ? err.message : String(err)}`);
-            }
-        }
-    }
 }
 
 let hookManager: HookManager | null = null;

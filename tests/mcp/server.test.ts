@@ -7,7 +7,6 @@ import { runMigrations } from '../../src/storage/migrations/runner.js';
 import { TaskRepository } from '../../src/storage/repositories/task.repo.js';
 import { ProjectRepository } from '../../src/storage/repositories/project.repo.js';
 import { TagRepository } from '../../src/storage/repositories/tag.repo.js';
-import { TimerRepository } from '../../src/storage/repositories/timer.repo.js';
 import { ActionLogRepository } from '../../src/storage/repositories/action-log.repo.js';
 import { DependencyRepository } from '../../src/storage/repositories/dependency.repo.js';
 import { TrackingRepository } from '../../src/storage/repositories/tracking.repo.js';
@@ -38,7 +37,6 @@ beforeEach(() => {
         taskRepo: new TaskRepository(db),
         projectRepo: new ProjectRepository(db),
         tagRepo: new TagRepository(db),
-        timerRepo: new TimerRepository(db),
         actionLog: new ActionLogRepository(db),
         depRepo: new DependencyRepository(db),
         trackingRepo: new TrackingRepository(db),

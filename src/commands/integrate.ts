@@ -28,8 +28,10 @@ integrateCommand
                     name: p.manifest.name,
                     displayName: p.manifest.displayName,
                     version: p.manifest.version,
+                    author: p.manifest.author,
                     enabled: p.enabled,
                     builtIn: p.manifest.builtIn || false,
+                    path: p.path,
                 }));
                 console.log(JSON.stringify(data, null, 2));
                 return;
@@ -43,7 +45,7 @@ integrateCommand
             }
 
             const table = makeTable({
-                head: ['Name', 'Display Name', 'Version', 'Status', 'Type'],
+                head: ['Name', 'Display Name', 'Version', 'Author', 'Status', 'Type'],
                 style: { head: [t.tableHeader.ink], border: [t.tableBorder.ink] },
             });
 
@@ -52,6 +54,7 @@ integrateCommand
                     t.heading.chalk(plugin.manifest.name),
                     plugin.manifest.displayName,
                     plugin.manifest.version,
+                    plugin.manifest.author || t.muted.chalk('-'),
                     plugin.enabled ? t.success.chalk('enabled') : t.muted.chalk('disabled'),
                     plugin.manifest.builtIn ? 'built-in' : 'plugin',
                 ]);
@@ -60,6 +63,72 @@ integrateCommand
             console.log(table.toString());
         } catch (err: unknown) {
             return fail(EXIT.GENERIC, `Failed to load integrations: ${err instanceof Error ? err.message : String(err)}`);
+        }
+    });
+
+integrateCommand
+    .command('info <name>')
+    .description('Show details about an integration')
+    .option('--json', 'Output as JSON')
+    .action(async (name: string, opts) => {
+        try {
+            await loadAll();
+            const registry = getRegistry();
+            const plugin = registry.get(name);
+            if (!requireEntity(plugin, 'Integration', `"${name}"`)) return;
+
+            const manifest = plugin.manifest;
+
+            if (opts.json) {
+                console.log(JSON.stringify({
+                    name: manifest.name,
+                    displayName: manifest.displayName,
+                    description: manifest.description,
+                    version: manifest.version,
+                    author: manifest.author,
+                    homepage: manifest.homepage,
+                    minCoreVersion: manifest.minCoreVersion,
+                    enabled: plugin.enabled,
+                    path: plugin.path,
+                }, null, 2));
+                return;
+            }
+
+            const t = theme();
+
+            console.log('');
+            console.log(t.heading.chalk(`  ${manifest.displayName}`));
+            console.log(t.muted.chalk('  ' + '─'.repeat(50)));
+            console.log('');
+            console.log(`  ${t.muted.chalk('Name:')}           ${manifest.name}`);
+            console.log(`  ${t.muted.chalk('Version:')}        ${manifest.version}`);
+            console.log(`  ${t.muted.chalk('Status:')}         ${plugin.enabled ? t.success.chalk('enabled') : t.muted.chalk('disabled')}`);
+
+            if (manifest.author) {
+                console.log(`  ${t.muted.chalk('Author:')}         ${manifest.author}`);
+            }
+
+            if (manifest.homepage) {
+                console.log(`  ${t.muted.chalk('Homepage:')}       ${manifest.homepage}`);
+            }
+
+            if (manifest.minCoreVersion) {
+                console.log(`  ${t.muted.chalk('Min Core Version:')} ${manifest.minCoreVersion}`);
+            }
+
+            console.log('');
+            console.log(t.muted.chalk('  Description'));
+            console.log(`  ${manifest.description}`);
+
+            if (plugin.path) {
+                console.log('');
+                console.log(t.muted.chalk('  Path'));
+                console.log(`  ${plugin.path}`);
+            }
+
+            console.log('');
+        } catch (err: unknown) {
+            return fail(EXIT.GENERIC, `Failed to show integration info: ${err instanceof Error ? err.message : String(err)}`);
         }
     });
 

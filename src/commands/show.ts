@@ -26,12 +26,11 @@ export const showCommand = new Command('show')
         // Enrich with dependency info
         const deps = ctx.depRepo.getDependencies(id);
         const dependents = ctx.depRepo.getDependents(id);
-        const pomodoroSessions = ctx.timerRepo.getByTaskId(id);
         const trackingSessions = ctx.trackingRepo.getByTaskId(id);
         const totalTracked = ctx.trackingRepo.getTotalForTask(id);
 
         if (opts.json) {
-            emitJson({ ok: true, command: 'show', data: { ...task, dependencies: deps, dependents, pomodoroSessions, trackingSessions, totalTracked } });
+            emitJson({ ok: true, command: 'show', data: { ...task, dependencies: deps, dependents, trackingSessions, totalTracked } });
             return;
         }
 
@@ -74,17 +73,6 @@ export const showCommand = new Command('show')
             }
             if (trackingSessions.length > 10) {
                 console.log(theme().muted.chalk(`    ... and ${trackingSessions.length - 10} more sessions`));
-            }
-            console.log('');
-        }
-
-        // Show pomodoro history (legacy, if any exist)
-        if (pomodoroSessions.length > 0 && trackingSessions.length === 0) {
-            console.log(t.panelBorder.chalk('  ── Pomodoro History ─────────────────────'));
-            for (const session of pomodoroSessions.slice(0, 10)) {
-                const status = session.completed ? '✓' : '○';
-                const mins = Math.round(session.duration / 60);
-                console.log(`    ${status} ${formatLocalDateTime(session.startedAt)} (${mins}min)`);
             }
             console.log('');
         }

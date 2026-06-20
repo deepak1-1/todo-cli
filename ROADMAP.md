@@ -55,7 +55,7 @@ shipping a local Llama model + Ink TUI, expose the task database as MCP tools.
 13. **Finish recurrence + natural-language recurrence** — complete `handleRecurringCompletion`;
     parse "every second Monday".
 14. **Productivity analytics** — streaks, burndown, velocity on stats + action-log.
-15. **GitLab / Linear providers** — `gitlab_ref` / `linear_ref` columns already exist.
+15. **GitLab / Linear providers** — add `gitlab_ref` / `linear_ref` columns + provider implementations (the unused placeholder columns were removed in migration 007).
 16. **AI-chat depth via MCP** — planning tools ("plan my week", "reschedule overdue") layered
     on the urgency engine.
 

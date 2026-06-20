@@ -41,8 +41,6 @@ function makeTask(overrides: Partial<TaskWithRelations> = {}): TaskWithRelations
         jiraKey: null,
         jiraId: null,
         githubRef: null,
-        gitlabRef: null,
-        linearRef: null,
         syncHash: null,
         lastSyncedAt: null,
         createdAt: '2025-01-01T00:00:00.000Z',

@@ -242,8 +242,6 @@ describe('jiraProvider.push', () => {
         jiraKey: 'PROJ-1',
         jiraId: null,
         githubRef: null,
-        gitlabRef: null,
-        linearRef: null,
         syncHash: null,
         lastSyncedAt: null,
         createdAt: '2026-01-01 00:00:00',
@@ -355,8 +353,8 @@ describe('jiraProvider.mapToRemote', () => {
         const task: Task = {
             id: 1, title: 'My Task', description: 'Details', status: 'in_progress',
             priority: 'medium', projectId: null, dueDate: '2026-10-01', recurrence: null,
-            timeSpent: 0, jiraKey: null, jiraId: null, githubRef: null, gitlabRef: null,
-            linearRef: null, syncHash: null, lastSyncedAt: null,
+            timeSpent: 0, jiraKey: null, jiraId: null, githubRef: null,
+            syncHash: null, lastSyncedAt: null,
             createdAt: '2026-01-01 00:00:00', updatedAt: '2026-01-01 00:00:00',
             completedAt: null, archivedAt: null,
         };

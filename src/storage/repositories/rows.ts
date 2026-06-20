@@ -1,6 +1,6 @@
 // Typed DB row interfaces — snake_case column names as returned by SQLite; repos cast these to domain types.
 
-// Corresponds to the `tasks` table (migrations 001, 004, 005).
+// Corresponds to the `tasks` table (migrations 001, 004, 005, 006, 007).
 export interface TaskRow {
     id: number;
     title: string;
@@ -14,8 +14,6 @@ export interface TaskRow {
     jira_key: string | null;
     jira_id: string | null;
     github_ref: string | null;
-    gitlab_ref: string | null;
-    linear_ref: string | null;
     sync_hash: string | null;
     last_synced_at: string | null;
     created_at: string;
@@ -48,16 +46,6 @@ export interface TagRow {
     id: number;
     name: string;
     color: string | null;
-}
-
-// Corresponds to the `pomodoro_sessions` table (migration 001).
-export interface PomodoroSessionRow {
-    id: number;
-    task_id: number;
-    started_at: string;
-    duration: number; // seconds
-    completed: number; // 0 or 1
-    notes: string | null;
 }
 
 // Corresponds to the `time_tracking` table (migration 002).

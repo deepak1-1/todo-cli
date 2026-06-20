@@ -1,19 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatTime, formatDuration, getBreakDuration, DEFAULT_SHORT_BREAK, DEFAULT_LONG_BREAK } from '../../src/core/timer.js';
-
-describe('formatTime', () => {
-    it('should format 0 seconds', () => {
-        expect(formatTime(0)).toBe('00:00');
-    });
-
-    it('should format 90 seconds', () => {
-        expect(formatTime(90)).toBe('01:30');
-    });
-
-    it('should format 25 minutes', () => {
-        expect(formatTime(1500)).toBe('25:00');
-    });
-});
+import { formatDuration } from '../../src/core/timer.js';
 
 describe('formatDuration', () => {
     it('should format seconds', () => {
@@ -75,21 +61,5 @@ describe('formatDuration', () => {
 
     it('should handle exact hour boundary with includeSeconds', () => {
         expect(formatDuration(7200, true)).toBe('2h 0m');
-    });
-});
-
-describe('getBreakDuration', () => {
-    it('should return short break for sessions 1-3', () => {
-        expect(getBreakDuration(1)).toBe(DEFAULT_SHORT_BREAK);
-        expect(getBreakDuration(2)).toBe(DEFAULT_SHORT_BREAK);
-        expect(getBreakDuration(3)).toBe(DEFAULT_SHORT_BREAK);
-    });
-
-    it('should return long break after 4 sessions', () => {
-        expect(getBreakDuration(4)).toBe(DEFAULT_LONG_BREAK);
-    });
-
-    it('should return long break after 8 sessions', () => {
-        expect(getBreakDuration(8)).toBe(DEFAULT_LONG_BREAK);
     });
 });

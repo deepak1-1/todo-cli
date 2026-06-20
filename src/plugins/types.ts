@@ -64,19 +64,11 @@ export interface PluginCommand {
     action: (...args: unknown[]) => Promise<void>;
 }
 
-export interface PluginTuiComponent {
-    name: string;
-    position: 'detail-panel' | 'dashboard-widget' | 'sidebar';
-    render: () => unknown; // React element
-}
-
 export interface PluginHooks {
     onTaskCreate?(task: Task): Promise<void>;
     onTaskUpdate?(task: Task, changes: Partial<Task>): Promise<void>;
     onTaskComplete?(task: Task): Promise<void>;
     onTaskDelete?(task: Task): Promise<void>;
-    onTimerStart?(task: Task): Promise<void>;
-    onTimerComplete?(task: Task, duration: number): Promise<void>;
 }
 
 export interface IntegrationProvider {
@@ -93,7 +85,6 @@ export interface IntegrationProvider {
     mapToRemote(task: Task): Record<string, unknown>;
 
     commands?(): PluginCommand[];
-    tuiComponents?(): PluginTuiComponent[];
     hooks?: PluginHooks;
 }
 

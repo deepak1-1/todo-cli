@@ -42,8 +42,6 @@ export interface Task {
     jiraKey: string | null;
     jiraId: string | null;
     githubRef: string | null;
-    gitlabRef: string | null;
-    linearRef: string | null;
     syncHash: string | null;
     lastSyncedAt: string | null;
     createdAt: string;
@@ -79,15 +77,6 @@ export interface Dependency {
     createdAt: string;
 }
 
-export interface PomodoroSession {
-    id: number;
-    taskId: number;
-    startedAt: string;
-    duration: number; // seconds
-    completed: boolean;
-    notes: string;
-}
-
 export interface ActionLogEntry {
     id: number;
     taskId: number | null;
@@ -96,16 +85,6 @@ export interface ActionLogEntry {
     prevState: string | null;
     newState: string | null;
     timestamp: string;
-}
-
-export interface IntegrationConfig {
-    id: number;
-    provider: string;
-    config: Record<string, unknown>;
-    enabled: boolean;
-    lastSyncAt: string | null;
-    createdAt: string;
-    updatedAt: string;
 }
 
 // ---- Input types ----

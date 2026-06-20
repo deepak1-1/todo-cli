@@ -2,7 +2,7 @@
 
 **Terminal task management for developers**
 
-A powerful CLI task manager designed for developers. Manage tasks directly from your terminal with a Pomodoro timer, integrations with your favourite tools, an extensible plugin system, and native AI-agent support via the Model Context Protocol.
+A powerful CLI task manager designed for developers. Manage tasks directly from your terminal with built-in time tracking, integrations with your favourite tools, an extensible plugin system, and native AI-agent support via the Model Context Protocol.
 
 ## Features
 
@@ -20,7 +20,7 @@ Connect todo-cli with your favorite tools:
 - **GitHub** - Create tasks from issues and PRs
 
 ### Productivity Features
-- Pomodoro timer with configurable intervals
+- Stopwatch time tracking with manual logging
 - Task completion tracking
 - Time estimates and actual time spent
 - Task history and activity logs
@@ -60,9 +60,15 @@ List all tasks:
 todo list
 ```
 
-Start working on a task (Pomodoro timer):
+Mark a task in progress:
 ```bash
 todo start <task-id>
+```
+
+Track time on a task with the stopwatch:
+```bash
+todo timer start <task-id>
+todo timer stop <task-id>
 ```
 
 Mark task as done:
@@ -116,8 +122,6 @@ Configure todo-cli via `~/.todo-cli/config.json`:
 ```json
 {
   "theme": "dark",
-  "timerWork": 25,
-  "timerBreak": 5,
   "defaultPriority": "medium",
   "storage": {
     "type": "sqlite",
@@ -133,10 +137,6 @@ Configure todo-cli via `~/.todo-cli/config.json`:
 - `forest` - Green forest-inspired theme
 - `dracula` - Popular Dracula color scheme
 - `nord` - Arctic, north-bluish color palette
-
-### Pomodoro Configuration
-- `timerWork` - Work interval in minutes (default: 25)
-- `timerBreak` - Break interval in minutes (default: 5)
 
 ## Integrations
 

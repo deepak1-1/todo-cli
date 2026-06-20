@@ -7,7 +7,6 @@ import { runMigrations } from '../../src/storage/migrations/runner.js';
 import { TaskRepository } from '../../src/storage/repositories/task.repo.js';
 import { ProjectRepository } from '../../src/storage/repositories/project.repo.js';
 import { TagRepository } from '../../src/storage/repositories/tag.repo.js';
-import { TimerRepository } from '../../src/storage/repositories/timer.repo.js';
 import { ActionLogRepository } from '../../src/storage/repositories/action-log.repo.js';
 import { DependencyRepository } from '../../src/storage/repositories/dependency.repo.js';
 import { TrackingRepository } from '../../src/storage/repositories/tracking.repo.js';
@@ -43,7 +42,6 @@ function buildCtx(database: Database.Database): AppContext {
         taskRepo: new TaskRepository(database),
         projectRepo: new ProjectRepository(database),
         tagRepo: new TagRepository(database),
-        timerRepo: new TimerRepository(database),
         actionLog: new ActionLogRepository(database),
         depRepo: new DependencyRepository(database),
         trackingRepo: new TrackingRepository(database),
@@ -343,6 +341,63 @@ describe('timer log', () => {
         restore();
         const sessions = ctx.trackingRepo.getByTaskId(task.id);
         expect(sessions[0].note).toBe('code review');
+    });
+});
+
+// ──────────────────────────────────────────────
+// timer report (stopwatch-only)
+// ──────────────────────────────────────────────
+describe('timer report', () => {
+    function captureLog(): { restore: () => void; text: () => string } {
+        const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        const err = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        return {
+            restore: () => { log.mockRestore(); err.mockRestore(); },
+            text: () => log.mock.calls.map(c => String(c[0]).replace(/\x1B\[[0-9;]*m/g, '')).join('\n'),
+        };
+    }
+
+    it('prints a no-data message when there are no completed sessions', async () => {
+        const cap = captureLog();
+        const { timerCommand } = await import('../../src/commands/timer.js');
+        await timerCommand.parseAsync(['report'], { from: 'user' });
+        const out = cap.text();
+        cap.restore();
+        expect(out).toMatch(/no time data/i);
+    });
+
+    it('shows task title, formatted total, and session count', async () => {
+        const cap = captureLog();
+        const task = ctx.taskRepo.create({ title: 'Report task', priority: 'medium' });
+        ctx.trackingRepo.logManual(task.id, 3600, 'seed');
+
+        const { timerCommand } = await import('../../src/commands/timer.js');
+        await timerCommand.parseAsync(['report'], { from: 'user' });
+        const out = cap.text();
+        cap.restore();
+
+        expect(out).toContain('Report task');
+        expect(out).toMatch(/1h/);
+        expect(out).toMatch(/Total: 1h across 1 sessions/);
+    });
+
+    it('aggregates multiple sessions per task and totals across tasks', async () => {
+        const cap = captureLog();
+        const a = ctx.taskRepo.create({ title: 'Task A', priority: 'high' });
+        const b = ctx.taskRepo.create({ title: 'Task B', priority: 'low' });
+        ctx.trackingRepo.logManual(a.id, 1800);
+        ctx.trackingRepo.logManual(a.id, 1800);
+        ctx.trackingRepo.logManual(b.id, 600);
+
+        const { timerCommand } = await import('../../src/commands/timer.js');
+        await timerCommand.parseAsync(['report'], { from: 'user' });
+        const out = cap.text();
+        cap.restore();
+
+        expect(out).toContain('Task A');
+        expect(out).toContain('Task B');
+        // 1800+1800 (A) + 600 (B) = 4200s = 1h 10m, 3 sessions
+        expect(out).toMatch(/Total: 1h 10m across 3 sessions/);
     });
 });
 

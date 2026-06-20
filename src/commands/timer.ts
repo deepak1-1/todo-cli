@@ -5,7 +5,7 @@ import { getContext } from './context.js';
 import { makeTable } from '../utils/table.js';
 import { theme } from '../utils/theme.js';
 import { formatLocalDateTime, parseSqliteUtc } from '../utils/date.js';
-import { formatDuration, DEFAULT_POMODORO } from '../core/timer.js';
+import { formatDuration } from '../core/timer.js';
 import { parseId, parseIntOption } from '../utils/format.js';
 import { fail, EXIT, requireEntity } from '../utils/exit.js';
 
@@ -218,89 +218,23 @@ Examples:
             })
     )
     .addCommand(
-        new Command('pomodoro')
-            .description('Start a pomodoro session for a task')
-            .argument('<id>', 'Task ID')
-            .option('--duration <minutes>', 'Duration in minutes (default: 25)')
-            .addHelpText('after', `
-Examples:
-  $ todo timer pomodoro 5
-  $ todo timer pomodoro 5 --duration 50`)
-            .action((rawId: string, opts) => {
-                const id = parseId(rawId);
-                const ctx = getContext();
-                const t = theme();
-                const task = ctx.taskRepo.getById(id);
-                if (!requireEntity(task, 'Task', `#${id}`)) return;
-
-                const dur = opts.duration ? parseIntOption(opts.duration, 'duration') : undefined;
-                const durationSec = dur ? dur * 60 : DEFAULT_POMODORO;
-                const session = ctx.timerRepo.create(id, durationSec);
-
-                ctx.timerRepo.complete(session.id);
-                ctx.taskRepo.update(id, { timeSpent: task.timeSpent + durationSec });
-
-                console.log(t.success.chalk(`✓ Recorded ${formatDuration(durationSec)} pomodoro for #${id}: `) + t.title.chalk(task.title));
-                console.log(t.muted.chalk(`  Session ID: ${session.id}`));
-            })
-    )
-    .addCommand(
         new Command('report')
-            .description('Unified time report (stopwatch + pomodoro)')
+            .description('Time report grouped by task over the last N days')
             .option('--days <n>', 'Number of days to report')
             .action((opts) => {
                 const ctx = getContext();
                 const t = theme();
                 const days = opts.days ? parseIntOption(opts.days, 'days') : 7;
 
-                const stopwatchReport = ctx.trackingRepo.getTimeReport(days);
-                const pomodoroReport = ctx.timerRepo.getTimeReport(days);
+                const entries = ctx.trackingRepo.getTimeReport(days);
 
-                const merged = new Map<number, {
-                    taskId: number; taskTitle: string;
-                    stopwatchTime: number; pomodoroTime: number;
-                    stopwatchSessions: number; pomodoroSessions: number;
-                }>();
-
-                for (const r of stopwatchReport) {
-                    merged.set(r.taskId, {
-                        taskId: r.taskId,
-                        taskTitle: r.taskTitle,
-                        stopwatchTime: r.totalTime,
-                        pomodoroTime: 0,
-                        stopwatchSessions: r.sessions,
-                        pomodoroSessions: 0,
-                    });
-                }
-
-                for (const r of pomodoroReport) {
-                    const existing = merged.get(r.taskId);
-                    if (existing) {
-                        existing.pomodoroTime = r.totalTime;
-                        existing.pomodoroSessions = r.sessions;
-                    } else {
-                        merged.set(r.taskId, {
-                            taskId: r.taskId,
-                            taskTitle: r.taskTitle,
-                            stopwatchTime: 0,
-                            pomodoroTime: r.totalTime,
-                            stopwatchSessions: 0,
-                            pomodoroSessions: r.sessions,
-                        });
-                    }
-                }
-
-                if (merged.size === 0) {
+                if (entries.length === 0) {
                     console.log(t.muted.chalk(`  No time data for the last ${days} days`));
                     return;
                 }
 
-                const entries = Array.from(merged.values()).sort(
-                    (a, b) => (b.stopwatchTime + b.pomodoroTime) - (a.stopwatchTime + a.pomodoroTime)
-                );
-
                 const table = makeTable({
-                    head: ['Task', 'Stopwatch', 'Pomodoro', 'Total', 'Sessions'],
+                    head: ['Task', 'Time', 'Sessions'],
                     style: { head: [t.tableHeader.ink], border: [t.tableBorder.ink] },
                 });
 
@@ -308,17 +242,13 @@ Examples:
                 let grandSessions = 0;
 
                 for (const e of entries) {
-                    const total = e.stopwatchTime + e.pomodoroTime;
-                    const sessions = e.stopwatchSessions + e.pomodoroSessions;
-                    grandTotal += total;
-                    grandSessions += sessions;
+                    grandTotal += e.totalTime;
+                    grandSessions += e.sessions;
 
                     table.push([
                         `#${e.taskId} ${e.taskTitle}`,
-                        e.stopwatchTime > 0 ? formatDuration(e.stopwatchTime) : t.muted.chalk('-'),
-                        e.pomodoroTime > 0 ? formatDuration(e.pomodoroTime) : t.muted.chalk('-'),
-                        formatDuration(total),
-                        sessions,
+                        formatDuration(e.totalTime),
+                        e.sessions,
                     ]);
                 }
 

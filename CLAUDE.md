@@ -27,12 +27,12 @@ After `npm run build`, the CLI is executable as `./dist/index.js` (bin name `tod
 ## High-Level Architecture
 
 ### CLI entry point and MCP server
-`src/index.ts` registers ~25 commander subcommands. **Invoking `todo` with no subcommand shows help** (same convention as git/docker). The `todo mcp` subcommand starts a Model Context Protocol stdio server (`src/mcp/`) that exposes task CRUD tools so any external AI agent (Claude Code, Claude Desktop, Cursor) can drive todo-cli. `todo mcp --print-config` prints the paste-ready JSON config block for MCP clients. `todo chat` is a one-release deprecation shim that prints a pointer to `todo mcp` and exits 0.
+`src/index.ts` registers ~25 commander subcommands. **Invoking `todo` with no subcommand shows help** (same convention as git/docker). The `todo mcp` subcommand starts a Model Context Protocol stdio server (`src/mcp/`) that exposes task CRUD tools so any external AI agent (Claude Code, Claude Desktop, Cursor) can drive todo-cli. `todo mcp --print-config` prints the paste-ready JSON config block for MCP clients.
 
 ### Core / storage / commands separation
 - `src/core/` — pure domain logic (types, filters, scheduler, timer math, dependency resolution). No I/O. Tests here should not touch SQLite.
 - `src/storage/` — `database.ts` owns a **singleton** `better-sqlite3` connection (WAL + foreign keys ON) under `~/.todo-cli/todo.db`. `migrations/runner.ts` applies numbered migrations in `src/storage/migrations/` inside a transaction, tracked in a `_migrations` table. Migrations that need `PRAGMA foreign_keys = OFF` set `requiresNoTransaction = true` and run outside the wrapping transaction. Each entity has its own repository in `src/storage/repositories/`.
-- `src/commands/` — commander subcommand wiring. Every command obtains the wired-up repos via `getContext()` in `src/commands/context.ts`, which lazily opens the DB, runs migrations, and constructs `AppContext` (`taskRepo`, `projectRepo`, `tagRepo`, `timerRepo`, `actionLog`, `depRepo`, `trackingRepo`). Do not instantiate repositories directly in command code — go through `getContext()`.
+- `src/commands/` — commander subcommand wiring. Every command obtains the wired-up repos via `getContext()` in `src/commands/context.ts`, which lazily opens the DB, runs migrations, and constructs `AppContext` (`taskRepo`, `projectRepo`, `tagRepo`, `actionLog`, `depRepo`, `trackingRepo`, `statusRepo`). Do not instantiate repositories directly in command code — go through `getContext()`.
 
 When adding a schema change, append a new `NNN-name.ts` migration and register it in `runner.ts`; never edit applied migrations.
 

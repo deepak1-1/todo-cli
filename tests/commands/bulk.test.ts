@@ -7,7 +7,6 @@ import { runMigrations } from '../../src/storage/migrations/runner.js';
 import { TaskRepository } from '../../src/storage/repositories/task.repo.js';
 import { ProjectRepository } from '../../src/storage/repositories/project.repo.js';
 import { TagRepository } from '../../src/storage/repositories/tag.repo.js';
-import { TimerRepository } from '../../src/storage/repositories/timer.repo.js';
 import { ActionLogRepository } from '../../src/storage/repositories/action-log.repo.js';
 import { DependencyRepository } from '../../src/storage/repositories/dependency.repo.js';
 import { TrackingRepository } from '../../src/storage/repositories/tracking.repo.js';
@@ -32,7 +31,6 @@ function buildCtx(database: Database.Database): AppContext {
         taskRepo: new TaskRepository(database),
         projectRepo: new ProjectRepository(database),
         tagRepo: new TagRepository(database),
-        timerRepo: new TimerRepository(database),
         actionLog: new ActionLogRepository(database),
         depRepo: new DependencyRepository(database),
         trackingRepo: new TrackingRepository(database),

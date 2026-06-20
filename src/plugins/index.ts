@@ -10,7 +10,6 @@ export type {
     CredentialStore,
     PluginLogger,
     PluginCommand,
-    PluginTuiComponent,
     PluginHooks,
     IntegrationProvider,
     PluginManifest,
