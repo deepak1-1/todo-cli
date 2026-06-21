@@ -2,7 +2,7 @@
 import { Command } from 'commander';
 import type { TaskFilters, TaskPriority, TaskSort, TaskWithRelations } from '../core/types.js';
 import { fuzzySearch } from '../core/filter.js';
-import { parseIntOption } from '../utils/format.js';
+import { parseIntOption, parseStrictPositiveInt } from '../utils/format.js';
 import type { AppContext } from './context.js';
 import { findByKeyOrVerb } from '../core/status.js';
 
@@ -15,6 +15,7 @@ export function addFilterOptions(cmd: Command): Command {
         .option('-d, --due <when>', 'Due date filter: today, overdue, this-week')
         .option('-c, --created <when>', 'Created date filter: today, yesterday, this-week, or YYYY-MM-DD')
         .option('-a, --all', 'Include done/archived tasks')
+        .option('--parent <id>', 'Show only children of a task ("none" for root tasks only)')
         .option('--sort <field>', 'Sort by: priority, due_date, created_at, title, status')
         .option('--reverse', 'Reverse sort order')
         .option('-n, --limit <count>', 'Limit results')
@@ -39,6 +40,14 @@ export function buildFilters(opts: Record<string, unknown>, ctx?: AppContext): T
     if (opts.due) filters.dueDate = opts.due as string;
     if (opts.created) filters.createdDate = opts.created as string;
     if (opts.all) filters.includeArchived = true;
+    if (opts.parent === 'none') filters.parentId = null;
+    else if (opts.parent) {
+        const pid = parseStrictPositiveInt(opts.parent as string);
+        if (pid === null) {
+            throw new Error(`--parent must be a positive task ID or "none", got: ${opts.parent}`);
+        }
+        filters.parentId = pid;
+    }
     if (!opts.status && !opts.all && ctx) {
         // Default: exclude archived statuses using the registry
         const defs = ctx.statusRepo.list();
@@ -49,7 +58,7 @@ export function buildFilters(opts: Record<string, unknown>, ctx?: AppContext): T
 }
 
 export function hasAnyFilter(opts: Record<string, unknown>): boolean {
-    return !!(opts.priority || opts.tag || opts.project || opts.status || opts.due || opts.created || opts.search);
+    return !!(opts.priority || opts.tag || opts.project || opts.status || opts.due || opts.created || opts.search || opts.parent);
 }
 
 // Opts type accepted by filterAndSearchTasks — union of common filter keys plus search/sort/reverse/limit
@@ -61,6 +70,7 @@ export interface FilterOpts {
     due?: string;
     created?: string;
     all?: boolean;
+    parent?: string;
     sort?: string;
     reverse?: boolean;
     limit?: string | number;

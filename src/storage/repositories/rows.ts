@@ -1,6 +1,6 @@
 // Typed DB row interfaces — snake_case column names as returned by SQLite; repos cast these to domain types.
 
-// Corresponds to the `tasks` table (migrations 001, 004, 005, 006, 007).
+// Corresponds to the `tasks` table (migrations 001, 004, 005, 006, 007, 008).
 export interface TaskRow {
     id: number;
     title: string;
@@ -20,6 +20,7 @@ export interface TaskRow {
     updated_at: string;
     completed_at: string | null;
     archived_at: string | null;
+    parent_id: number | null;
 }
 
 // Extends TaskRow with JOIN columns produced by the WITH-RELATIONS queries in task.repo.ts.

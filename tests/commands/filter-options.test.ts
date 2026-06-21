@@ -9,7 +9,7 @@ import { DependencyRepository } from '../../src/storage/repositories/dependency.
 import { TrackingRepository } from '../../src/storage/repositories/tracking.repo.js';
 import { StatusRepository } from '../../src/storage/repositories/status.repo.js';
 import type { AppContext } from '../../src/commands/context.js';
-import { filterAndSearchTasks } from '../../src/commands/filter-options.js';
+import { filterAndSearchTasks, buildFilters } from '../../src/commands/filter-options.js';
 import type Database from 'better-sqlite3';
 
 let db: Database.Database;
@@ -113,5 +113,60 @@ describe('filterAndSearchTasks', () => {
     it('returns filters object reflecting the built TaskFilters', () => {
         const { filters } = filterAndSearchTasks(ctx, { priority: 'urgent' });
         expect(filters.priority).toBe('urgent');
+    });
+});
+
+// ─── buildFilters — --parent validation ────────────────────────────────────────
+describe('buildFilters — --parent validation', () => {
+    it('sets parentId to null when parent is "none"', () => {
+        const filters = buildFilters({ parent: 'none' });
+        expect(filters.parentId).toBeNull();
+    });
+
+    it('sets parentId to the parsed integer for a valid positive id string', () => {
+        const filters = buildFilters({ parent: '5' });
+        expect(filters.parentId).toBe(5);
+    });
+
+    it('throws for a non-numeric string', () => {
+        expect(() => buildFilters({ parent: 'abc' })).toThrow(/--parent must be a positive task ID/);
+    });
+
+    it('throws for "0" (zero is not a valid task id)', () => {
+        expect(() => buildFilters({ parent: '0' })).toThrow(/--parent must be a positive task ID/);
+    });
+
+    it('throws for a negative string', () => {
+        expect(() => buildFilters({ parent: '-3' })).toThrow(/--parent must be a positive task ID/);
+    });
+
+    it('throws for whitespace-padded value " 5 " (parseInt succeeds but leading space may mislead — verify)', () => {
+        // parseInt(' 5 ', 10) === 5, so this is accepted as 5 (not rejected)
+        const filters = buildFilters({ parent: ' 5 ' });
+        expect(filters.parentId).toBe(5);
+    });
+
+    it('throws for leading-zero string "05" — parseInt parses to 5, accepted as valid', () => {
+        // parseInt('05', 10) === 5 > 0 — accepted
+        const filters = buildFilters({ parent: '05' });
+        expect(filters.parentId).toBe(5);
+    });
+
+    it('does not set parentId when parent option is absent', () => {
+        const filters = buildFilters({});
+        expect(filters.parentId).toBeUndefined();
+    });
+
+    it('throws for a float string that encodes a non-positive value via truncation (e.g. "0.9" → 0)', () => {
+        // parseInt('0.9', 10) === 0 which is <= 0
+        expect(() => buildFilters({ parent: '0.9' })).toThrow(/--parent must be a positive task ID/);
+    });
+
+    it('error message includes the bad value for diagnostics', () => {
+        expect(() => buildFilters({ parent: 'xyz' })).toThrow('xyz');
+    });
+
+    it('filterAndSearchTasks propagates the --parent throw to the caller', () => {
+        expect(() => filterAndSearchTasks(ctx, { parent: 'bad' })).toThrow(/--parent must be a positive task ID/);
     });
 });

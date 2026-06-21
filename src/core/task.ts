@@ -78,6 +78,7 @@ export function handleRecurringCompletion(
         projectId: task.projectId,
         dueDate: format(nextDue, 'yyyy-MM-dd'),
         recurrence: task.recurrence,
+        parentId: task.parentId,
     });
 
     const tags = tagRepo.getTaskTags(task.id);
@@ -86,4 +87,61 @@ export function handleRecurringCompletion(
     }
 
     return newTask;
+}
+
+/**
+ * Returns true if making `proposedParentId` the parent of `childId` would create a cycle
+ * (i.e. the proposed parent is the child itself or one of its descendants). Walks the parent
+ * chain upward via the injected `getParent` lookup; pure, no I/O.
+ */
+export function wouldCreateParentCycle(
+    childId: number,
+    proposedParentId: number,
+    getParent: (id: number) => number | null,
+): boolean {
+    if (childId === proposedParentId) return true;
+    const seen = new Set<number>();
+    let current: number | null = proposedParentId;
+    while (current !== null) {
+        if (current === childId) return true;
+        if (seen.has(current)) break; // guard against a pre-existing corrupt cycle
+        seen.add(current);
+        current = getParent(current);
+    }
+    return false;
+}
+
+/** Format a subtask progress rollup, e.g. "1/3 done". Empty string when there are no children. */
+export function rollupProgress(done: number, total: number): string {
+    return total === 0 ? '' : `${done}/${total} done`;
+}
+
+/**
+ * Re-order a flat task list into depth-first parent→child order with a per-id depth map for
+ * indented tree rendering. A task whose parent is absent from the set (e.g. filtered out) is
+ * treated as a root so partial subtrees still render. Pure; preserves input sibling order.
+ */
+export function orderAsTree<T extends { id: number; parentId: number | null }>(
+    tasks: T[],
+): { ordered: T[]; depths: Map<number, number> } {
+    const byId = new Set(tasks.map((t) => t.id));
+    const childrenOf = new Map<number | null, T[]>();
+    for (const task of tasks) {
+        const key = task.parentId !== null && byId.has(task.parentId) ? task.parentId : null;
+        const bucket = childrenOf.get(key);
+        if (bucket) bucket.push(task);
+        else childrenOf.set(key, [task]);
+    }
+
+    const ordered: T[] = [];
+    const depths = new Map<number, number>();
+    const visit = (parentKey: number | null, depth: number): void => {
+        for (const task of childrenOf.get(parentKey) ?? []) {
+            ordered.push(task);
+            depths.set(task.id, depth);
+            visit(task.id, depth + 1);
+        }
+    };
+    visit(null, 0);
+    return { ordered, depths };
 }

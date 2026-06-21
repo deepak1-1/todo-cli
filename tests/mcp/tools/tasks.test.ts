@@ -941,3 +941,334 @@ describe('zod schema boundary — real McpServer validation', () => {
         assertSchemaError(result, /priority/i);
     });
 });
+
+// ─── coverage completion: handler catch blocks + remaining filter/arg branches ──
+// The only intentionally-uncovered branch in tasks.ts is the `?? undefined` on the
+// add-task priority (line 54): zod's prioritySchema enum rejects non-priority values
+// before the handler, so normalizePriority can never return null there.
+describe('todo_list_tasks — error path and remaining filter branches', () => {
+    it('returns isError when the repo throws (catch block)', async () => {
+        ctx.taskRepo.create({ title: 'Pre', priority: 'low' });
+        await loadTools();
+        vi.spyOn(ctx.taskRepo, 'list').mockImplementation(() => { throw new Error('db boom'); });
+
+        const result = server.call('todo_list_tasks', {}) as Record<string, unknown>;
+
+        expect(result).toHaveProperty('isError', true);
+        expect((result.content as Array<{ text: string }>)[0].text).toMatch(/db boom/);
+    });
+
+    it('filters by projectName', async () => {
+        const proj = ctx.projectRepo.getOrCreate('Backend');
+        const t1 = ctx.taskRepo.create({ title: 'In project', priority: 'medium', projectId: proj.id });
+        ctx.taskRepo.create({ title: 'No project', priority: 'medium' });
+        await loadTools();
+
+        const result = server.call('todo_list_tasks', { projectName: 'Backend' }) as Record<string, unknown>;
+        const tasks = (result.structuredContent as { items: Array<Record<string, unknown>> }).items;
+
+        expect(tasks).toHaveLength(1);
+        expect(tasks[0].id).toBe(t1.id);
+    });
+
+    it('filters by dueDate keyword "overdue"', async () => {
+        ctx.taskRepo.create({ title: 'Overdue task', priority: 'medium', dueDate: '2000-01-01' });
+        ctx.taskRepo.create({ title: 'No due', priority: 'medium' });
+        await loadTools();
+
+        const result = server.call('todo_list_tasks', { dueDate: 'overdue' }) as Record<string, unknown>;
+        const tasks = (result.structuredContent as { items: Array<Record<string, unknown>> }).items;
+
+        expect(tasks).toHaveLength(1);
+        expect(tasks[0].title).toBe('Overdue task');
+    });
+
+    it('filters by dueBefore', async () => {
+        ctx.taskRepo.create({ title: 'Early', priority: 'medium', dueDate: '2026-01-01' });
+        ctx.taskRepo.create({ title: 'Late', priority: 'medium', dueDate: '2027-12-31' });
+        await loadTools();
+
+        const result = server.call('todo_list_tasks', { dueBefore: '2026-06-01' }) as Record<string, unknown>;
+        const tasks = (result.structuredContent as { items: Array<Record<string, unknown>> }).items;
+
+        expect(tasks.map((t) => t.title)).toEqual(['Early']);
+    });
+
+    it('filters by dueAfter', async () => {
+        ctx.taskRepo.create({ title: 'Early', priority: 'medium', dueDate: '2026-01-01' });
+        ctx.taskRepo.create({ title: 'Late', priority: 'medium', dueDate: '2027-12-31' });
+        await loadTools();
+
+        const result = server.call('todo_list_tasks', { dueAfter: '2027-01-01' }) as Record<string, unknown>;
+        const tasks = (result.structuredContent as { items: Array<Record<string, unknown>> }).items;
+
+        expect(tasks.map((t) => t.title)).toEqual(['Late']);
+    });
+
+    it('defaults sortDirection to asc when only sortField is given', async () => {
+        ctx.taskRepo.create({ title: 'Bravo', priority: 'low' });
+        ctx.taskRepo.create({ title: 'Alpha', priority: 'low' });
+        await loadTools();
+
+        const result = server.call('todo_list_tasks', { sortField: 'title' }) as Record<string, unknown>;
+        const tasks = (result.structuredContent as { items: Array<Record<string, unknown>> }).items;
+
+        expect(tasks[0].title).toBe('Alpha');
+    });
+});
+
+describe('todo_get_task — error path', () => {
+    it('returns isError when the repo throws (catch block)', async () => {
+        const task = ctx.taskRepo.create({ title: 'Boom', priority: 'low' });
+        await loadTools();
+        vi.spyOn(ctx.taskRepo, 'getByIdWithRelations').mockImplementation(() => { throw new Error('get boom'); });
+
+        const result = server.call('todo_get_task', { id: task.id }) as Record<string, unknown>;
+
+        expect(result).toHaveProperty('isError', true);
+        expect((result.content as Array<{ text: string }>)[0].text).toMatch(/get boom/);
+    });
+});
+
+describe('todo_update_task — remaining arg branches', () => {
+    it('updates description', async () => {
+        const task = ctx.taskRepo.create({ title: 'Desc task', priority: 'medium' });
+        await loadTools();
+
+        const result = server.call('todo_update_task', { id: task.id, description: 'New description' }) as Record<string, unknown>;
+
+        expect(result).not.toHaveProperty('isError');
+        expect(ctx.taskRepo.getById(task.id)?.description).toBe('New description');
+    });
+
+    it('updates recurrence', async () => {
+        const task = ctx.taskRepo.create({ title: 'Recur update', priority: 'medium' });
+        await loadTools();
+
+        const result = server.call('todo_update_task', { id: task.id, recurrence: 'monthly' }) as Record<string, unknown>;
+
+        expect(result).not.toHaveProperty('isError');
+        expect(ctx.taskRepo.getById(task.id)?.recurrence).toBe('monthly');
+    });
+
+    it('moves the task to a project when projectName has a value', async () => {
+        const task = ctx.taskRepo.create({ title: 'Move me', priority: 'medium' });
+        await loadTools();
+
+        const result = server.call('todo_update_task', { id: task.id, projectName: 'NewProj' }) as Record<string, unknown>;
+
+        expect(result).not.toHaveProperty('isError');
+        const proj = ctx.projectRepo.getByName('NewProj');
+        expect(proj).not.toBeNull();
+        expect(ctx.taskRepo.getById(task.id)?.projectId).toBe(proj!.id);
+    });
+});
+
+// ─── subtask / parentId coverage ─────────────────────────────────────────────
+describe('todo_add_task — parentId', () => {
+    it('creates a subtask when a valid parentId is supplied', async () => {
+        const parent = ctx.taskRepo.create({ title: 'Parent', priority: 'medium' });
+        await loadTools();
+
+        const result = server.call('todo_add_task', { title: 'Child', parentId: parent.id }) as Record<string, unknown>;
+
+        expect(result).not.toHaveProperty('isError');
+        const structured = result.structuredContent as Record<string, unknown>;
+        const childId = structured.id as number;
+        expect(ctx.taskRepo.getById(childId)?.parentId).toBe(parent.id);
+    });
+
+    it('returns isError when parentId refers to a non-existent task', async () => {
+        await loadTools();
+        const result = server.call('todo_add_task', { title: 'Orphan', parentId: 99999 }) as Record<string, unknown>;
+
+        expect(result).toHaveProperty('isError', true);
+        const content = (result.content as Array<{ text: string }>)[0];
+        expect(content.text).toMatch(/not found/i);
+    });
+});
+
+describe('todo_update_task — parentId', () => {
+    it('detaches a child (parentId:0 → parent=false)', async () => {
+        const parent = ctx.taskRepo.create({ title: 'Parent', priority: 'medium' });
+        const child = ctx.taskRepo.create({ title: 'Child', priority: 'low', parentId: parent.id });
+        await loadTools();
+
+        const result = server.call('todo_update_task', { id: child.id, parentId: 0 }) as Record<string, unknown>;
+
+        expect(result).not.toHaveProperty('isError');
+        expect(ctx.taskRepo.getById(child.id)?.parentId).toBeNull();
+    });
+
+    it('re-parents with a valid positive parentId', async () => {
+        const p1 = ctx.taskRepo.create({ title: 'Parent1', priority: 'medium' });
+        const p2 = ctx.taskRepo.create({ title: 'Parent2', priority: 'medium' });
+        const child = ctx.taskRepo.create({ title: 'Child', priority: 'low', parentId: p1.id });
+        await loadTools();
+
+        const result = server.call('todo_update_task', { id: child.id, parentId: p2.id }) as Record<string, unknown>;
+
+        expect(result).not.toHaveProperty('isError');
+        expect(ctx.taskRepo.getById(child.id)?.parentId).toBe(p2.id);
+    });
+
+    it('returns isError when parentId would create a cycle', async () => {
+        const a = ctx.taskRepo.create({ title: 'A', priority: 'medium' });
+        const b = ctx.taskRepo.create({ title: 'B', priority: 'medium', parentId: a.id });
+        await loadTools();
+
+        // Making A a child of B creates cycle A → B → A
+        const result = server.call('todo_update_task', { id: a.id, parentId: b.id }) as Record<string, unknown>;
+
+        expect(result).toHaveProperty('isError', true);
+        const content = (result.content as Array<{ text: string }>)[0];
+        expect(content.text).toMatch(/cycle/i);
+    });
+
+    it('rejects a 3-level cycle via MCP: making the root a grandchild of its own grandchild', async () => {
+        // Chain: A → B → C  (A is grandparent, C is grandchild)
+        const a = ctx.taskRepo.create({ title: 'A', priority: 'medium' });
+        const b = ctx.taskRepo.create({ title: 'B', priority: 'medium', parentId: a.id });
+        const c = ctx.taskRepo.create({ title: 'C', priority: 'medium', parentId: b.id });
+        await loadTools();
+
+        // Making A a child of C creates cycle A → B → C → A
+        const result = server.call('todo_update_task', { id: a.id, parentId: c.id }) as Record<string, unknown>;
+
+        expect(result).toHaveProperty('isError', true);
+        const content = (result.content as Array<{ text: string }>)[0];
+        expect(content.text).toMatch(/cycle/i);
+    });
+
+    it('allows a valid re-parent that does not form a 3-level cycle', async () => {
+        // Chain: A → B → C; moving C under a new unrelated root D is safe
+        const a = ctx.taskRepo.create({ title: 'A', priority: 'medium' });
+        const b = ctx.taskRepo.create({ title: 'B', priority: 'medium', parentId: a.id });
+        const c = ctx.taskRepo.create({ title: 'C', priority: 'medium', parentId: b.id });
+        const d = ctx.taskRepo.create({ title: 'D', priority: 'low' });
+        await loadTools();
+
+        const result = server.call('todo_update_task', { id: c.id, parentId: d.id }) as Record<string, unknown>;
+
+        expect(result).not.toHaveProperty('isError');
+        expect(ctx.taskRepo.getById(c.id)?.parentId).toBe(d.id);
+    });
+});
+
+describe('todo_get_task — children and progress fields', () => {
+    it('returns children array and progress when parent has subtasks', async () => {
+        const parent = ctx.taskRepo.create({ title: 'Parent', priority: 'medium' });
+        ctx.taskRepo.create({ title: 'Child1', priority: 'low', parentId: parent.id });
+        ctx.taskRepo.create({ title: 'Child2', priority: 'low', parentId: parent.id });
+        await loadTools();
+
+        const result = server.call('todo_get_task', { id: parent.id }) as Record<string, unknown>;
+
+        expect(result).not.toHaveProperty('isError');
+        const structured = result.structuredContent as Record<string, unknown>;
+        expect(Array.isArray(structured.children)).toBe(true);
+        expect((structured.children as unknown[]).length).toBe(2);
+        const progress = structured.progress as { done: number; total: number };
+        expect(progress.total).toBe(2);
+        expect(progress.done).toBe(0);
+    });
+
+    it('progress.done increments when a child is marked done', async () => {
+        const parent = ctx.taskRepo.create({ title: 'Parent', priority: 'medium' });
+        const c1 = ctx.taskRepo.create({ title: 'C1', priority: 'low', parentId: parent.id });
+        ctx.taskRepo.create({ title: 'C2', priority: 'low', parentId: parent.id });
+        ctx.taskRepo.update(c1.id, { status: 'done' });
+        await loadTools();
+
+        const result = server.call('todo_get_task', { id: parent.id }) as Record<string, unknown>;
+
+        const progress = (result.structuredContent as Record<string, unknown>).progress as { done: number; total: number };
+        expect(progress).toEqual({ done: 1, total: 2 });
+    });
+});
+
+// ─── MCP recurring-completion wiring (todo_set_status on a recurring task) ─────
+describe('todo_set_status — recurring completion', () => {
+    it('creates the next occurrence when a recurring task is completed', async () => {
+        await loadTools();
+        const add = server.call('todo_add_task', { title: 'Weekly standup', recurrence: 'weekly', tags: ['team'] }) as Record<string, unknown>;
+        const id = (add.structuredContent as Record<string, unknown>).id as number;
+
+        const result = server.call('todo_set_status', { id, status: 'done' }) as Record<string, unknown>;
+
+        expect(result).not.toHaveProperty('isError');
+        const sameTitle = ctx.taskRepo.list({ includeArchived: true }).filter((t) => t.title === 'Weekly standup');
+        expect(sameTitle).toHaveLength(2);
+        expect(sameTitle.some((t) => t.status === 'done')).toBe(true);
+        expect(sameTitle.some((t) => t.status === 'todo' && t.recurrence === 'weekly')).toBe(true);
+    });
+
+    it('regenerated occurrence of a recurring child stays under the same parent', async () => {
+        const parent = ctx.taskRepo.create({ title: 'Epic', priority: 'medium' });
+        await loadTools();
+        const add = server.call('todo_add_task', { title: 'Weekly report', recurrence: 'weekly', parentId: parent.id }) as Record<string, unknown>;
+        const id = (add.structuredContent as Record<string, unknown>).id as number;
+
+        server.call('todo_set_status', { id, status: 'done' });
+
+        const all = ctx.taskRepo.list({ includeArchived: true }).filter((t) => t.title === 'Weekly report');
+        expect(all).toHaveLength(2);
+        // Both the completed and the new occurrence must have the same parentId
+        expect(all.every((t) => t.parentId === parent.id)).toBe(true);
+    });
+});
+
+// ─── handler catches surface a non-Error throw via String(e) (defensive arm) ───
+describe('handler catches stringify a non-Error throw', () => {
+    it('todo_list_tasks', async () => {
+        await loadTools();
+        vi.spyOn(ctx.taskRepo, 'list').mockImplementation(() => { throw 'raw-list'; });
+        const r = server.call('todo_list_tasks', {}) as Record<string, unknown>;
+        expect(r).toHaveProperty('isError', true);
+        expect((r.content as Array<{ text: string }>)[0].text).toMatch(/raw-list/);
+    });
+
+    it('todo_get_task', async () => {
+        const t = ctx.taskRepo.create({ title: 'g', priority: 'low' });
+        await loadTools();
+        vi.spyOn(ctx.taskRepo, 'getByIdWithRelations').mockImplementation(() => { throw 'raw-get'; });
+        const r = server.call('todo_get_task', { id: t.id }) as Record<string, unknown>;
+        expect(r).toHaveProperty('isError', true);
+        expect((r.content as Array<{ text: string }>)[0].text).toMatch(/raw-get/);
+    });
+
+    it('todo_add_task', async () => {
+        await loadTools();
+        vi.spyOn(ctx.taskRepo, 'create').mockImplementation(() => { throw 'raw-add'; });
+        const r = server.call('todo_add_task', { title: 'x' }) as Record<string, unknown>;
+        expect(r).toHaveProperty('isError', true);
+        expect((r.content as Array<{ text: string }>)[0].text).toMatch(/raw-add/);
+    });
+
+    it('todo_update_task', async () => {
+        const t = ctx.taskRepo.create({ title: 'u', priority: 'low' });
+        await loadTools();
+        vi.spyOn(ctx.taskRepo, 'update').mockImplementation(() => { throw 'raw-update'; });
+        const r = server.call('todo_update_task', { id: t.id, title: 'New' }) as Record<string, unknown>;
+        expect(r).toHaveProperty('isError', true);
+        expect((r.content as Array<{ text: string }>)[0].text).toMatch(/raw-update/);
+    });
+
+    it('todo_set_status', async () => {
+        const t = ctx.taskRepo.create({ title: 's', priority: 'low' });
+        await loadTools();
+        vi.spyOn(ctx.taskRepo, 'update').mockImplementation(() => { throw 'raw-status'; });
+        const r = server.call('todo_set_status', { id: t.id, status: 'done' }) as Record<string, unknown>;
+        expect(r).toHaveProperty('isError', true);
+        expect((r.content as Array<{ text: string }>)[0].text).toMatch(/raw-status/);
+    });
+
+    it('todo_delete_task', async () => {
+        const t = ctx.taskRepo.create({ title: 'd', priority: 'low' });
+        await loadTools(false);
+        vi.spyOn(ctx.taskRepo, 'archive').mockImplementation(() => { throw 'raw-delete'; });
+        const r = server.call('todo_delete_task', { id: t.id }) as Record<string, unknown>;
+        expect(r).toHaveProperty('isError', true);
+        expect((r.content as Array<{ text: string }>)[0].text).toMatch(/raw-delete/);
+    });
+});

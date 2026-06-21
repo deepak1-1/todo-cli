@@ -308,3 +308,58 @@ describe('bulk edit', () => {
         expect(ctx.taskRepo.getById(t1.id)?.priority).toBe('urgent');
     });
 });
+
+// ──────────────────────────────────────────────
+// bulk delete — parent/child promotion (now routes through applyDelete)
+// ──────────────────────────────────────────────
+// bulk delete reuses applyDelete(), so soft-archiving a parent promotes its
+// children to root (same path as `rm`), preventing orphaned-under-archive tasks.
+describe('bulk delete — subtask promotion on archive', () => {
+    it('promotes children to root when a parent is bulk-archived (soft delete)', async () => {
+        const restore = silenceConsole();
+        const parent = ctx.taskRepo.create({ title: 'Parent task', priority: 'urgent' });
+        const child = ctx.taskRepo.create({ title: 'Child task', priority: 'low', parentId: parent.id });
+
+        const bulkCommand = await loadBulkCommand();
+        await bulkCommand.parseAsync(['delete', '--priority', 'urgent', '--yes'], { from: 'user' });
+
+        restore();
+
+        // Parent is archived
+        expect(ctx.taskRepo.getById(parent.id)?.status).toBe('archived');
+
+        // Child is promoted to root (parentId null), and the promotion is logged for undo.
+        expect(ctx.taskRepo.getById(child.id)?.parentId).toBeNull();
+        const last = ctx.actionLog.getByTaskId(parent.id).find(e => e.action === 'archive');
+        expect(JSON.parse(last!.prevState!).promotedChildIds).toEqual([child.id]);
+    });
+
+    it('documents that bulk delete with --force does NOT restore children when parent is hard-deleted (FK SET NULL)', async () => {
+        const restore = silenceConsole();
+        const parent = ctx.taskRepo.create({ title: 'Parent force', priority: 'urgent' });
+        const child = ctx.taskRepo.create({ title: 'Child force', priority: 'low', parentId: parent.id });
+
+        const bulkCommand = await loadBulkCommand();
+        await bulkCommand.parseAsync(['delete', '--priority', 'urgent', '--force', '--yes'], { from: 'user' });
+
+        restore();
+
+        // Parent is gone (hard deleted)
+        expect(ctx.taskRepo.getById(parent.id)).toBeNull();
+        // FK ON DELETE SET NULL fires — child survives with parentId null (correct by accident)
+        expect(ctx.taskRepo.getById(child.id)?.parentId).toBeNull();
+    });
+
+    it('applyDelete (single-task path) correctly promotes children on soft delete', async () => {
+        // Contrast: the single-task delete command (applyDelete) DOES call promoteChildren
+        const { applyDelete } = await import('../../src/commands/delete.js');
+        const parent = ctx.taskRepo.create({ title: 'Parent single', priority: 'urgent' });
+        const child = ctx.taskRepo.create({ title: 'Child single', priority: 'low', parentId: parent.id });
+
+        applyDelete(ctx, parent.id);
+
+        // Single-task path promotes correctly
+        expect(ctx.taskRepo.getById(parent.id)?.status).toBe('archived');
+        expect(ctx.taskRepo.getById(child.id)?.parentId).toBeNull(); // correctly promoted
+    });
+});

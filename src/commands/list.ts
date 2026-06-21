@@ -6,6 +6,7 @@ import { Command } from 'commander';
 import { getContext } from './context.js';
 import { theme } from '../utils/theme.js';
 import { formatTaskTable, parseIntOption } from '../utils/format.js';
+import { orderAsTree } from '../core/task.js';
 import { addFilterOptions, filterAndSearchTasks } from './filter-options.js';
 import { fail, EXIT } from '../utils/exit.js';
 import { emptyStateMessage } from '../utils/empty-state.js';
@@ -14,6 +15,7 @@ const cmd = new Command('ls')
     .alias('list')
     .description('List tasks with filtering and sorting')
     .option('--json', 'Output as JSON')
+    .option('--tree', 'Render tasks as an indented parent/child tree')
     .addHelpText('after', `
 Examples:
   $ todo ls --priority high --tag backend
@@ -33,7 +35,12 @@ export const listCommand = cmd
         }
 
         const ctx = getContext();
-        const { tasks } = filterAndSearchTasks(ctx, opts);
+        let tasks;
+        try {
+            ({ tasks } = filterAndSearchTasks(ctx, opts));
+        } catch (e: unknown) {
+            return fail(EXIT.USAGE, e instanceof Error ? e.message : String(e), { json: opts.json, command: 'list' });
+        }
 
         if (opts.json) {
             console.log(JSON.stringify(tasks, null, 2));
@@ -57,5 +64,10 @@ export const listCommand = cmd
             console.log(theme().muted.chalk(`  ${tasks.length} result${tasks.length !== 1 ? 's' : ''} for "${opts.search}":\n`));
         }
 
-        console.log(formatTaskTable(tasks, ctx.statusRepo.list()));
+        if (opts.tree) {
+            const { ordered, depths } = orderAsTree(tasks);
+            console.log(formatTaskTable(ordered, ctx.statusRepo.list(), depths));
+        } else {
+            console.log(formatTaskTable(tasks, ctx.statusRepo.list()));
+        }
     });

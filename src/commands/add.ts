@@ -7,7 +7,7 @@ import { getContext } from './context.js';
 import { theme } from '../utils/theme.js';
 import { validateCreateInput } from '../core/task.js';
 import { parseDate, formatDateDisplay } from '../utils/date.js';
-import { success, formatPriorityLabel, parseIds as parseIdList } from '../utils/format.js';
+import { success, formatPriorityLabel, parseIds as parseIdList, parseStrictPositiveInt } from '../utils/format.js';
 import { fail, EXIT } from '../utils/exit.js';
 import { emitJson } from '../utils/json-output.js';
 import { VALID_RECURRENCES, normalizePriority, PRIORITY_ERROR } from '../core/types.js';
@@ -22,6 +22,7 @@ export interface ApplyAddInput {
     dueDate?: string | null;
     recurrence?: RecurrencePattern;
     tags?: string[];
+    parentId?: number | null;
 }
 
 /** Pure mutating core: validate, create, action-log. Throws on invalid input. */
@@ -33,6 +34,7 @@ export function applyAdd(ctx: AppContext, input: ApplyAddInput): { task: Task } 
         projectId: input.projectId,
         dueDate: input.dueDate,
         recurrence: input.recurrence,
+        parentId: input.parentId,
     });
 
     const task = ctx.taskRepo.create(validated);
@@ -61,6 +63,7 @@ export const addCommand = new Command('add')
     .option('-d, --due <date>', 'Due date (natural language)')
     .option('-D, --description <text>', 'Long description')
     .option('--depends <ids>', 'Comma-separated task IDs this depends on')
+    .option('--parent <id>', 'Parent task ID — create as a subtask (breakdown/rollup, not blocking order)')
     .option('-r, --recur <pattern>', 'Recurrence: daily, weekly, biweekly, monthly, yearly')
     .option('--json', 'Output JSON instead of human-readable text')
     .addHelpText('after', `
@@ -94,6 +97,14 @@ Examples:
             }
         }
 
+        let parentId: number | null = null;
+        if (opts.parent) {
+            parentId = parseStrictPositiveInt(opts.parent) ?? 0;
+            if (parentId === 0 || !ctx.taskRepo.getById(parentId)) {
+                return fail(EXIT.USAGE, `Parent task #${opts.parent} not found`, { json: jsonMode, command: 'add' });
+            }
+        }
+
         const { task } = applyAdd(ctx, {
             title,
             description: opts.description,
@@ -102,6 +113,7 @@ Examples:
             dueDate,
             recurrence: opts.recur as RecurrencePattern | undefined,
             tags: opts.tag,
+            parentId,
         });
 
         // Set dependencies (CLI-only; not exposed via MCP tools)

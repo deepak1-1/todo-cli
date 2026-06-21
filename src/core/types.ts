@@ -48,6 +48,7 @@ export interface Task {
     updatedAt: string;
     completedAt: string | null;
     archivedAt: string | null;
+    parentId: number | null;
 }
 
 export interface Project {
@@ -99,6 +100,7 @@ export interface CreateTaskInput {
     recurrence?: RecurrencePattern | null;
     tags?: string[];
     dependsOn?: number[];
+    parentId?: number | null;
 }
 
 export interface UpdateTaskInput {
@@ -143,6 +145,7 @@ export interface TaskFilters {
     completedBefore?: string; // ISO date — completed_at <= this
     search?: string;
     includeArchived?: boolean;
+    parentId?: number | null; // null = roots only (parent_id IS NULL)
 }
 
 export interface TaskSort {
@@ -159,6 +162,8 @@ export interface TaskWithRelations extends Task {
     isBlocked?: boolean;
     blockedBy?: number[];
     blocking?: number[];
+    children?: TaskWithRelations[];
+    progress?: { done: number; total: number };
 }
 
 // ---- Search result type ----
@@ -180,6 +185,7 @@ export interface EditOptions {
     status?: string;
     depends?: string[];
     blocks?: string[];
+    parent?: string | false; // id string to set, false to detach (--no-parent)
 }
 
 // ---- Repository update fields ----
@@ -200,6 +206,7 @@ export interface UpdateTaskFields {
     githubRef?: string | null;
     syncHash?: string | null;
     lastSyncedAt?: string | null;
+    parentId?: number | null;
 }
 
 // ---- Output format ----

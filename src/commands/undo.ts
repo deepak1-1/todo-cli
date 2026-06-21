@@ -45,6 +45,13 @@ export const undoCommand = new Command('undo')
             } else if (last.action === 'archive' && last.taskId && last.prevState) {
                 const prev = JSON.parse(last.prevState);
                 ctx.taskRepo.update(last.taskId, { status: prev.status || defaultStatusKey, archivedAt: null });
+                // Re-attach children that were promoted to root when the parent was archived;
+                // any intermediate manual re-parent is overwritten (expected undo semantics).
+                if (Array.isArray(prev.promotedChildIds)) {
+                    for (const childId of prev.promotedChildIds) {
+                        ctx.taskRepo.update(childId, { parentId: last.taskId });
+                    }
+                }
                 undoneAction = `unarchived task #${last.taskId}`;
                 if (!opts.json) console.log(success(`Undone: ${undoneAction}`));
             } else {

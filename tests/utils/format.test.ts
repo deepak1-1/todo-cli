@@ -321,6 +321,46 @@ describe('formatTaskTable', () => {
         expect(noColor).toContain('Proj');
         expect(withColor).not.toBe(noColor);
     });
+
+    it('tree mode — child title cell contains indent and └─ prefix', () => {
+        const parent = makeTask({ id: 1, title: 'Parent task' });
+        const child = makeTask({ id: 2, title: 'Child task' });
+        const depths = new Map([[1, 0], [2, 1]]);
+        const table = formatTaskTable([parent, child], undefined, depths);
+        // Parent at depth 0 — no indent prefix
+        expect(table).toContain('Parent task');
+        // Child at depth 1 — must contain the └─ connector
+        expect(table).toContain('└─');
+        expect(table).toContain('Child task');
+    });
+
+    it('tree mode — depth-2 grandchild has double indent', () => {
+        const parent = makeTask({ id: 1, title: 'Root' });
+        const child = makeTask({ id: 2, title: 'Child' });
+        const grandchild = makeTask({ id: 3, title: 'Grandchild' });
+        const depths = new Map([[1, 0], [2, 1], [3, 2]]);
+        const table = formatTaskTable([parent, child, grandchild], undefined, depths);
+        expect(table).toContain('└─');
+        expect(table).toContain('Grandchild');
+    });
+
+    it('tree mode — blocked child still shows ⊘ prefix before the indented title', () => {
+        const parent = makeTask({ id: 1, title: 'Parent' });
+        const blocked = makeTask({ id: 2, title: 'Blocked child', isBlocked: true });
+        const depths = new Map([[1, 0], [2, 1]]);
+        const table = formatTaskTable([parent, blocked], undefined, depths);
+        // ⊘ should appear (added by blocked branch) AND the child title must appear
+        expect(table).toContain('⊘');
+        expect(table).toContain('Blocked child');
+    });
+
+    it('tree mode — task with depth 0 in treeDepths does not prefix the title with └─', () => {
+        const task = makeTask({ id: 1, title: 'Root task' });
+        const withDepths = formatTaskTable([task], undefined, new Map([[1, 0]]));
+        // The title cell must not have └─ before the task title text
+        expect(withDepths).not.toContain('└─ Root task');
+        expect(withDepths).toContain('Root task');
+    });
 });
 
 describe('formatTaskDetail', () => {
@@ -328,6 +368,23 @@ describe('formatTaskDetail', () => {
         const task = makeTask({ title: 'Detailed task' });
         const detail = formatTaskDetail(task);
         expect(detail).toContain('Detailed task');
+    });
+
+    it('should show subtask progress rollup and the child list', () => {
+        const task = makeTask({
+            progress: { done: 1, total: 3 },
+            children: [makeTask({ id: 7, title: 'Child seven' })],
+        });
+        const detail = formatTaskDetail(task);
+        expect(detail).toContain('1/3 done');
+        expect(detail).toContain('Subtasks');
+        expect(detail).toContain('Child seven');
+    });
+
+    it('should not show a Subtasks section when there are no children', () => {
+        const detail = formatTaskDetail(makeTask({ progress: { done: 0, total: 0 } }));
+        expect(detail).not.toContain('1/0');
+        expect(detail).not.toMatch(/Subtasks:/);
     });
 
     it('should include status and priority', () => {

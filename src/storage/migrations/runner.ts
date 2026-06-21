@@ -10,6 +10,7 @@ import * as migration004 from './004-fix-tasks-fk.js';
 import * as migration005 from './005-add-in-qa-status.js';
 import * as migration006 from './006-dynamic-statuses.js';
 import * as migration007 from './007-drop-unused.js';
+import * as migration008 from './008-task-parent.js';
 
 interface Migration {
     name: string;
@@ -31,6 +32,7 @@ const migrations: Migration[] = [
     { name: '005-add-in-qa-status', up: migration005.up, down: migration005.down, requiresNoTransaction: migration005.requiresNoTransaction },
     { name: '006-dynamic-statuses', up: migration006.up, down: migration006.down, requiresNoTransaction: migration006.requiresNoTransaction },
     { name: '007-drop-unused', up: migration007.up, down: migration007.down, requiresNoTransaction: migration007.requiresNoTransaction },
+    { name: '008-task-parent', up: migration008.up, down: migration008.down, requiresNoTransaction: migration008.requiresNoTransaction },
 ];
 
 /** Ensure the _migrations tracking table exists */

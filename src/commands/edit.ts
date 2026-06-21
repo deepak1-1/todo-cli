@@ -5,9 +5,9 @@
 import { Command } from 'commander';
 import { getContext } from './context.js';
 import { theme } from '../utils/theme.js';
-import { handleRecurringCompletion, validateUpdateInput } from '../core/task.js';
+import { handleRecurringCompletion, validateUpdateInput, wouldCreateParentCycle } from '../core/task.js';
 import { parseDate } from '../utils/date.js';
-import { success, error, formatStatus, parseId } from '../utils/format.js';
+import { success, error, formatStatus, parseId, parseStrictPositiveInt } from '../utils/format.js';
 import { fail, EXIT, requireEntity } from '../utils/exit.js';
 import { emitJson } from '../utils/json-output.js';
 import { VALID_RECURRENCES, normalizePriority, PRIORITY_ERROR } from '../core/types.js';
@@ -53,6 +53,20 @@ export function applyEdit(
         changes.projectId = null;
     } else if (opts.project) {
         changes.projectId = ctx.projectRepo.getOrCreate(opts.project as string).id;
+    }
+
+    // Parent (subtask) — validate existence + reject cycles BEFORE the update write.
+    if (opts.parent === false) {
+        changes.parentId = null;
+    } else if (opts.parent) {
+        const pid = parseStrictPositiveInt(opts.parent);
+        if (pid === null || !ctx.taskRepo.getById(pid)) {
+            throw new Error(`Parent task #${opts.parent} not found`);
+        }
+        if (wouldCreateParentCycle(id, pid, (x) => ctx.taskRepo.getById(x)?.parentId ?? null)) {
+            throw new Error('Setting this parent would create a cycle');
+        }
+        changes.parentId = pid;
     }
 
     if (targetStatus) {
@@ -260,6 +274,8 @@ export const editCommand = new Command('edit')
     .option('-r, --recur <pattern>', 'Recurrence pattern')
     .option('--no-due', 'Remove due date')
     .option('--no-project', 'Remove from project')
+    .option('--parent <id>', 'Set parent task (breakdown/rollup, not blocking order)')
+    .option('--no-parent', 'Detach from parent (promote to root)')
     .option('--depends <ids...>', 'Dependencies (+id to add, -id to remove)')
     .option('--blocks <ids...>', 'Tasks this blocks (+id to add, -id to remove)')
     .option('--json', 'Output JSON instead of human-readable text')

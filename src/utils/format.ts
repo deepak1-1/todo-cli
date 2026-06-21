@@ -6,6 +6,7 @@ import type { StatusDef } from '../core/status.js';
 import { makeTable } from './table.js';
 import { formatDateDisplay, isOverdue, formatLocalDateTime } from './date.js';
 import { formatDuration } from '../core/timer.js';
+import { rollupProgress } from '../core/task.js';
 import { theme } from './theme.js';
 import { colorizeProject } from './project-color.js';
 
@@ -126,8 +127,12 @@ export function formatTaskOneLine(task: TaskWithRelations): string {
     return parts.join('  ');
 }
 
-/** Format task list as a table */
-export function formatTaskTable(tasks: (TaskWithRelations | SearchResult)[], defs?: StatusDef[]): string {
+/** Format task list as a table. `treeDepths` maps task id → indent depth for --tree rendering. */
+export function formatTaskTable(
+    tasks: (TaskWithRelations | SearchResult)[],
+    defs?: StatusDef[],
+    treeDepths?: Map<number, number>,
+): string {
     const t = theme();
     if (tasks.length === 0) return t.muted.chalk('  No tasks found.');
 
@@ -148,11 +153,13 @@ export function formatTaskTable(tasks: (TaskWithRelations | SearchResult)[], def
     });
 
     for (const task of tasks) {
+        const depth = treeDepths?.get(task.id) ?? 0;
+        const titleText = depth > 0 ? '  '.repeat(depth) + '└─ ' + task.title : task.title;
         const row = [
             t.id.chalk(`#${task.id}`),
             task.jiraKey ? t.ref.chalk(task.jiraKey) : task.githubRef ? t.ref.chalk('#' + task.githubRef.replace(/^.*#/, '')) : '',
             formatPriority(task.priority),
-            task.isBlocked ? t.blocked.chalk('⊘ ') + t.title.chalk(task.title) : t.title.chalk(task.title),
+            task.isBlocked ? t.blocked.chalk('⊘ ') + t.title.chalk(titleText) : t.title.chalk(titleText),
             task.projectName ? colorizeProject(task.projectName, task.projectColor) : '',
             (task.tagNames || []).join(', '),
             formatStatus(task.status, defs),
@@ -199,6 +206,18 @@ export function formatTaskDetail(task: TaskWithRelations, defs?: StatusDef[]): s
         lines.push(`  ${t.subtitle.chalk('Completed:')}  ${formatLocalDateTime(task.completedAt)}`);
     }
 
+    if (task.progress && task.progress.total > 0) {
+        lines.push(`  ${t.subtitle.chalk('Subtasks:')}   ${rollupProgress(task.progress.done, task.progress.total)}`);
+    }
+
+    if (task.children && task.children.length > 0) {
+        lines.push('');
+        lines.push(t.panelBorder.chalk('  ── Subtasks ─────────────────────────────'));
+        for (const child of task.children) {
+            lines.push(`  ${formatStatus(child.status, defs)} ${t.id.chalk('#' + child.id)} ${t.title.chalk(child.title)}`);
+        }
+    }
+
     if (task.description) {
         lines.push('');
         lines.push(t.panelBorder.chalk('  ── Description ──────────────────────────'));
@@ -242,6 +261,14 @@ export function warn(message: string): string {
 /** Format an info message */
 export function info(message: string): string {
     return theme().info.chalk('ℹ') + ' ' + message;
+}
+
+/** Strict positive-integer parse (digits only, surrounding whitespace tolerated). Null if invalid — rejects "5abc", "0.9", "-3", "0". */
+export function parseStrictPositiveInt(value: string): number | null {
+    const trimmed = value.trim();
+    if (!/^\d+$/.test(trimmed)) return null;
+    const n = Number(trimmed);
+    return n > 0 ? n : null;
 }
 
 /** Parse a task ID string, throwing if invalid */

@@ -26,14 +26,16 @@ export function applyDelete(ctx: AppContext, id: number, opts?: { force?: boolea
             newState: null,
         });
     } else {
+        // Promote children to root before archiving so live subtasks aren't hidden under an
+        // archived parent; record their IDs so undo can re-parent them.
+        const promotedChildIds = ctx.taskRepo.promoteChildren(id);
         ctx.taskRepo.archive(id);
-        // Retrieve archive status key from registry for the action log
         const archiveKey = ctx.statusRepo.list().find(d => d.archives)?.key ?? 'archived';
         ctx.actionLog.log({
             taskId: id,
             action: 'archive',
             entityType: 'task',
-            prevState: JSON.stringify({ status: task.status }),
+            prevState: JSON.stringify({ status: task.status, promotedChildIds }),
             newState: JSON.stringify({ status: archiveKey }),
         });
     }
@@ -53,7 +55,18 @@ export const deleteCommand = new Command('rm')
         const jsonMode = !!opts.json;
 
         if (opts.done) {
-            const count = ctx.taskRepo.archiveAllDone();
+            const archived = ctx.taskRepo.archiveAllDone();
+            const archiveKey = ctx.statusRepo.list().find(d => d.archives)?.key ?? 'archived';
+            for (const { id: archivedId, prevStatus, promotedChildIds } of archived) {
+                ctx.actionLog.log({
+                    taskId: archivedId,
+                    action: 'archive',
+                    entityType: 'task',
+                    prevState: JSON.stringify({ status: prevStatus, promotedChildIds }),
+                    newState: JSON.stringify({ status: archiveKey }),
+                });
+            }
+            const count = archived.length;
             if (jsonMode) {
                 emitJson({ ok: true, command: 'delete', data: { archived: count } });
             } else {

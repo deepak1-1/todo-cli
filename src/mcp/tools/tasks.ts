@@ -46,6 +46,7 @@ export function registerTaskTools(server: McpServer, opts: { allowDelete: boolea
                 dueDate: z.string().optional().describe('Due date: ISO date or natural language like "next friday"'),
                 tags: z.array(z.string()).optional().describe('Tag names'),
                 recurrence: recurrenceSchema.describe(`Recurrence: ${VALID_RECURRENCES.join(', ')}`),
+                parentId: z.number().int().positive().optional().describe('Parent task ID — create as a subtask'),
             },
         },
         (args) => {
@@ -66,6 +67,10 @@ export function registerTaskTools(server: McpServer, opts: { allowDelete: boolea
                     }
                 }
 
+                if (args.parentId !== undefined && !ctx.taskRepo.getById(args.parentId)) {
+                    return err(`Parent task #${args.parentId} not found.`);
+                }
+
                 const { task } = applyAdd(ctx, {
                     title: args.title,
                     description: args.description,
@@ -74,6 +79,7 @@ export function registerTaskTools(server: McpServer, opts: { allowDelete: boolea
                     dueDate,
                     tags: args.tags,
                     recurrence: args.recurrence,
+                    parentId: args.parentId ?? null,
                 });
 
                 return ok(task, `Created task #${task.id}: ${task.title}`);
@@ -98,6 +104,7 @@ export function registerTaskTools(server: McpServer, opts: { allowDelete: boolea
                 dueDate: z.string().optional().describe('New due date (empty string removes due date)'),
                 tags: z.array(z.string()).optional().describe('Tags to add; prefix "-name" to remove. Bare names are added (existing tags kept). Empty array is a no-op.'),
                 recurrence: recurrenceSchema.describe('New recurrence pattern'),
+                parentId: z.number().int().nonnegative().optional().describe('Parent task ID; 0 detaches (promote to root)'),
             },
         },
         (args) => {
@@ -129,6 +136,10 @@ export function registerTaskTools(server: McpServer, opts: { allowDelete: boolea
 
                 // Bare names are mapped to add-semantics (+name) to prevent silent tag replacement.
                 if (args.tags !== undefined) editOpts.tag = args.tags.map(t => /^[+-]/.test(t) ? t : '+' + t);
+
+                // parentId 0 detaches; any positive id re-parents (applyEdit validates existence + cycles).
+                if (args.parentId === 0) editOpts.parent = false;
+                else if (args.parentId !== undefined) editOpts.parent = String(args.parentId);
 
                 const { task } = applyEdit(ctx, args.id, editOpts);
                 return ok(task, `Updated task #${task.id}: ${task.title}`);

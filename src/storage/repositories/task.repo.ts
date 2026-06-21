@@ -33,6 +33,7 @@ const mapRow = makeMapper<TaskRow, Task>({
     updatedAt: { col: 'updated_at' },
     completedAt: { col: 'completed_at', transform: nullable },
     archivedAt: { col: 'archived_at', transform: nullable },
+    parentId: { col: 'parent_id', transform: nullable },
 });
 
 // Maps TaskRowWithRelations columns to TaskWithRelations; reuses Task fields + JOIN fields.
@@ -55,6 +56,7 @@ const mapRowWithRelations = makeMapper<TaskRowWithRelations, TaskWithRelations>(
     updatedAt: { col: 'updated_at' },
     completedAt: { col: 'completed_at', transform: nullable },
     archivedAt: { col: 'archived_at', transform: nullable },
+    parentId: { col: 'parent_id', transform: nullable },
     projectName: { col: 'project_name', transform: nullable },
     projectColor: { col: 'project_color', transform: nullable },
     tagNames: { col: 'tag_names', transform: csvToArray },
@@ -90,12 +92,12 @@ export class TaskRepository {
             title, description, status, priority,
             project_id, due_date, recurrence,
             jira_key, jira_id, github_ref,
-            sync_hash, last_synced_at
+            sync_hash, last_synced_at, parent_id
         ) VALUES (
             @title, @description, @status, @priority,
             @projectId, @dueDate, @recurrence,
             @jiraKey, @jiraId, @githubRef,
-            @syncHash, @lastSyncedAt
+            @syncHash, @lastSyncedAt, @parentId
         )`;
 
         // Ensure all values are SQLite-bindable (string, number, buffer, or null)
@@ -120,6 +122,7 @@ export class TaskRepository {
             githubRef: safe(input.githubRef),
             syncHash: safe(input.syncHash),
             lastSyncedAt: safe(input.lastSyncedAt),
+            parentId: safe(input.parentId),
         };
 
         const result = this.db.prepare(sql).run(params);
@@ -153,7 +156,43 @@ export class TaskRepository {
             GROUP BY t.id
         `).get(id) as TaskRowWithRelations | undefined;
 
-        return row ? mapRowWithRelations(row) : null;
+        if (!row) return null;
+        const task = mapRowWithRelations(row);
+        task.children = this.getChildren(id);
+        task.progress = this.getChildProgress(id);
+        return task;
+    }
+
+    /** Direct children of a task (non-archived), ordered like the default list. */
+    getChildren(parentId: number): TaskWithRelations[] {
+        return this.list({ parentId });
+    }
+
+    /**
+     * Subtask progress rollup. Archived children are excluded from both done and total.
+     * Filters independently of getChildren() (which relies on list()'s default archived
+     * exclusion) — both intentionally treat archived children the same way.
+     */
+    getChildProgress(parentId: number): { done: number; total: number } {
+        const row = this.db.prepare(`
+            SELECT
+                SUM(CASE WHEN status NOT IN (SELECT key FROM statuses WHERE archives = 1) THEN 1 ELSE 0 END) AS total,
+                SUM(CASE WHEN status IN (SELECT key FROM statuses WHERE completes = 1 AND archives = 0) THEN 1 ELSE 0 END) AS done
+            FROM tasks WHERE parent_id = ?
+        `).get(parentId) as { total: number | null; done: number | null };
+        return { done: row.done ?? 0, total: row.total ?? 0 };
+    }
+
+    /** Detach all children of a task (promote to root). Returns the promoted child IDs. */
+    promoteChildren(parentId: number): number[] {
+        const childIds = (this.db.prepare('SELECT id FROM tasks WHERE parent_id = ?').all(parentId) as { id: number }[])
+            .map((r) => r.id);
+        if (childIds.length > 0) {
+            this.db.prepare(
+                "UPDATE tasks SET parent_id = NULL, updated_at = datetime('now') WHERE parent_id = ?",
+            ).run(parentId);
+        }
+        return childIds;
     }
 
     /** List tasks with filters, sorting, and relations */
@@ -266,6 +305,13 @@ export class TaskRepository {
                 )`);
                 params.push(...filters.tags);
             }
+
+            if (filters.parentId === null) {
+                conditions.push('t.parent_id IS NULL');
+            } else if (filters.parentId !== undefined) {
+                conditions.push('t.parent_id = ?');
+                params.push(filters.parentId);
+            }
         }
 
         const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -339,6 +385,7 @@ export class TaskRepository {
             githubRef: 'github_ref',
             syncHash: 'sync_hash',
             lastSyncedAt: 'last_synced_at',
+            parentId: 'parent_id',
         };
 
         const sets: string[] = [];
@@ -378,16 +425,31 @@ export class TaskRepository {
         return result.changes > 0;
     }
 
-    /** Archive all completing tasks (status.completes=1) — routes to first archiving status */
-    archiveAllDone(): number {
+    /**
+     * Archive all completing tasks (status.completes=1) — routes to first archiving status.
+     * Children of archived parents are promoted to root; returns one entry per archived task
+     * (with the IDs of any promoted children) so callers can log and undo each.
+     */
+    archiveAllDone(): { id: number; prevStatus: string; promotedChildIds: number[] }[] {
         const archiveStatus = (this.db.prepare(
             "SELECT key FROM statuses WHERE archives = 1 ORDER BY sort_order ASC LIMIT 1",
         ).get() as { key: string } | undefined)?.key ?? 'archived';
-        const result = this.db.prepare(`
-            UPDATE tasks SET status = ?, archived_at = datetime('now'), updated_at = datetime('now')
-            WHERE status IN (SELECT key FROM statuses WHERE completes = 1)
-        `).run(archiveStatus);
-        return result.changes;
+
+        const run = this.db.transaction(() => {
+            const tasks = this.db.prepare(
+                'SELECT id, status FROM tasks WHERE status IN (SELECT key FROM statuses WHERE completes = 1)',
+            ).all() as { id: number; status: string }[];
+
+            const archiveOne = this.db.prepare(
+                `UPDATE tasks SET status = ?, archived_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
+            );
+            return tasks.map(({ id, status }) => {
+                const promotedChildIds = this.promoteChildren(id);
+                archiveOne.run(archiveStatus, id);
+                return { id, prevStatus: status, promotedChildIds };
+            });
+        });
+        return run();
     }
 
     /** Get task count by status (all known statuses, zero-filled from statuses table). */
