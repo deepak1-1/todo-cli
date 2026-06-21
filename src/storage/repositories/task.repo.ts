@@ -61,6 +61,7 @@ const mapRowWithRelations = makeMapper<TaskRowWithRelations, TaskWithRelations>(
     isBlocked: { col: 'is_blocked', transform: boolFromInt },
 });
 
+// SQL mirror of PRIORITY_ORDER in core/types.ts — keep the two in sync (source of truth: PRIORITY_ORDER).
 const PRIORITY_SORT_EXPR = `CASE t.priority WHEN 'urgent' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 END`;
 const DEFAULT_ORDER = `ORDER BY ${PRIORITY_SORT_EXPR} DESC, t.due_date ASC NULLS LAST`;
 

@@ -12,6 +12,7 @@ import { promptUser } from '../utils/prompt.js';
 import { fail, EXIT } from '../utils/exit.js';
 import { emitJson } from '../utils/json-output.js';
 import { runIntegrationCommand } from './_integration-runner.js';
+import { importRemoteTasks } from '../integrations/shared/import-tasks.js';
 
 export const jiraCommand = new Command('jira')
     .description('Jira Cloud integration');
@@ -70,50 +71,31 @@ Examples:
                 return;
             }
 
-            let created = 0;
-            let skipped = 0;
-
-            const projectCache = new Map<string, number>();
-            function resolveProjectId(projectKey: string | undefined): number | undefined {
-                if (!projectKey) return undefined;
-                if (projectCache.has(projectKey)) return projectCache.get(projectKey);
-                const project = ctx.projectRepo.getOrCreate(projectKey, { description: `Jira project ${projectKey}` });
-                projectCache.set(projectKey, project.id);
-                return project.id;
-            }
-
-            for (const issue of issues) {
-                const jiraKey = (issue.metadata?.jiraKey as string) || issue.externalRef;
-                const jiraId = (issue.metadata?.jiraId as string) || issue.externalId;
-
-                try {
-                    const match = ctx.taskRepo.findByJiraKey(jiraKey);
-
-                    if (match) {
-                        skipped++;
-                        continue;
-                    }
-
-                    const mapped = plugin.provider.mapToLocal(issue);
-                    const pid = resolveProjectId(issue.project);
-
-                    ctx.taskRepo.create({
-                        title: mapped.title || issue.title,
-                        description: mapped.description || issue.description || '',
-                        priority: mapped.priority || 'medium',
-                        status: mapped.status || 'todo',
-                        jiraKey: jiraKey,
-                        syncHash: (issue.metadata?.syncHash as string) || '',
-                        lastSyncedAt: new Date().toISOString(),
-                        projectId: pid ?? undefined,
-                        dueDate: mapped.dueDate,
-                        jiraId: jiraId || undefined,
-                    });
-                    created++;
-                } catch (syncErr: unknown) {
-                    logger.log(t.warning.chalk(`  Warning: failed to sync ${jiraKey}: ${syncErr instanceof Error ? syncErr.message : String(syncErr)}`));
-                }
-            }
+            const { created, skipped } = importRemoteTasks({
+                issues,
+                plugin,
+                taskRepo: ctx.taskRepo,
+                projectRepo: ctx.projectRepo,
+                findExisting: (issue) => ctx.taskRepo.findByJiraKey((issue.metadata?.jiraKey as string) || issue.externalRef),
+                projectName: (issue) => issue.project,
+                projectDescription: (issue) => `Jira project ${issue.project}`,
+                buildInput: (issue, mapped, projectId) => ({
+                    title: mapped.title || issue.title,
+                    description: mapped.description || issue.description || '',
+                    priority: mapped.priority || 'medium',
+                    status: mapped.status || 'todo',
+                    jiraKey: (issue.metadata?.jiraKey as string) || issue.externalRef,
+                    syncHash: (issue.metadata?.syncHash as string) || '',
+                    lastSyncedAt: new Date().toISOString(),
+                    projectId: projectId ?? undefined,
+                    dueDate: mapped.dueDate,
+                    jiraId: ((issue.metadata?.jiraId as string) || issue.externalId) || undefined,
+                }),
+                onError: (issue, err) => {
+                    const jiraKey = (issue.metadata?.jiraKey as string) || issue.externalRef;
+                    logger.log(t.warning.chalk(`  Warning: failed to sync ${jiraKey}: ${err instanceof Error ? err.message : String(err)}`));
+                },
+            });
 
             if (opts.json) {
                 emitJson({ ok: true, command: 'jira pull', data: { pulled: issues.length, created, skipped } });

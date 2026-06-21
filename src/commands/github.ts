@@ -7,6 +7,7 @@ import { theme } from '../utils/theme.js';
 import type { ExternalTask, RegisteredPlugin } from '../plugins/index.js';
 import { GitHubClient } from '../integrations/github/github-client.js';
 import { parseGitHubRef } from '../integrations/github/ref.js';
+import { importRemoteTasks } from '../integrations/shared/import-tasks.js';
 import { createPluginLogger } from '../plugins/plugin-logger.js';
 import type { TaskRepository } from '../storage/repositories/task.repo.js';
 import type { ProjectRepository } from '../storage/repositories/project.repo.js';
@@ -27,42 +28,28 @@ function importGitHubIssues(
     projectRepo: ProjectRepository,
     tagRepo: TagRepository,
 ): { created: number; skipped: number } {
-    let created = 0;
-    let skipped = 0;
-
-    for (const issue of issues) {
-        const existing = taskRepo.findByGithubRef(issue.externalRef);
-        if (existing) {
-            skipped++;
-            continue;
-        }
-
-        let projectId: number | null = null;
-        if (issue.project) {
-            projectId = projectRepo.getOrCreate(issue.project, {
-                description: `GitHub: ${issue.externalRef.split('#')[0]}`,
-            }).id;
-        }
-
-        const localData = plugin.provider.mapToLocal(issue);
-
-        const task = taskRepo.create({
-            title: localData.title || issue.title,
-            description: localData.description,
-            priority: localData.priority,
-            dueDate: localData.dueDate,
-            projectId,
+    return importRemoteTasks({
+        issues,
+        plugin,
+        taskRepo,
+        projectRepo,
+        findExisting: (issue) => taskRepo.findByGithubRef(issue.externalRef),
+        projectName: (issue) => issue.project,
+        projectDescription: (issue) => `GitHub: ${issue.externalRef.split('#')[0]}`,
+        buildInput: (issue, mapped, projectId) => ({
+            title: mapped.title || issue.title,
+            description: mapped.description,
+            priority: mapped.priority,
+            dueDate: mapped.dueDate,
+            projectId: projectId ?? null,
             githubRef: issue.externalRef,
-        });
-
-        if (localData.tags && localData.tags.length > 0) {
-            tagRepo.addTaskTags(task.id, localData.tags);
-        }
-
-        created++;
-    }
-
-    return { created, skipped };
+        }),
+        onCreated: (taskId, _issue, mapped) => {
+            if (mapped.tags && mapped.tags.length > 0) {
+                tagRepo.addTaskTags(taskId, mapped.tags);
+            }
+        },
+    });
 }
 
 export const githubCommand = new Command('gh')
