@@ -4,9 +4,7 @@ import { theme } from '../utils/theme.js';
 import * as readline from 'node:readline';
 import { getContext } from './context.js';
 import { executeEdit } from './edit.js';
-import { getHookManager } from '../plugins/hook-manager.js';
 import { formatTaskTable, success } from '../utils/format.js';
-import { logWarn } from '../utils/logger.js';
 import { addFilterOptions, filterAndSearchTasks, hasAnyFilter } from '../utils/filter-options.js';
 import { fail, EXIT } from '../utils/exit.js';
 import { emitJson } from '../utils/json-output.js';
@@ -115,11 +113,9 @@ addSharedOptions(deleteCmd)
         for (const task of tasks) {
             if (opts.force) {
                 ctx.taskRepo.delete(task.id);
-                getHookManager().onTaskDelete(task).catch((e) => logWarn(`Hook error: ${e instanceof Error ? e.message : String(e)}`));
                 ctx.actionLog.log({ taskId: task.id, action: 'hard_delete', entityType: 'task', prevState: JSON.stringify(task), newState: null });
             } else {
                 ctx.taskRepo.archive(task.id);
-                getHookManager().onTaskDelete(task).catch((e) => logWarn(`Hook error: ${e instanceof Error ? e.message : String(e)}`));
                 ctx.actionLog.log({ taskId: task.id, action: 'archive', entityType: 'task', prevState: JSON.stringify({ status: task.status }), newState: JSON.stringify({ status: archiveKey }) });
             }
             taskIds.push(task.id);

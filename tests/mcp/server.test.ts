@@ -21,15 +21,6 @@ vi.mock('../../src/commands/context.js', () => ({
     getContext: () => ctx,
 }));
 
-vi.mock('../../src/plugins/hook-manager.js', () => ({
-    getHookManager: () => ({
-        onTaskCreate: vi.fn().mockResolvedValue(undefined),
-        onTaskUpdate: vi.fn().mockResolvedValue(undefined),
-        onTaskComplete: vi.fn().mockResolvedValue(undefined),
-        onTaskDelete: vi.fn().mockResolvedValue(undefined),
-    }),
-}));
-
 beforeEach(() => {
     db = createTestDb();
     runMigrations(db);

@@ -13,16 +13,6 @@ import { TrackingRepository } from '../../src/storage/repositories/tracking.repo
 import type { AppContext } from '../../src/commands/context.js';
 import type { JsonSuccess, JsonError } from '../../src/utils/json-output.js';
 
-// Mock hook manager to avoid async side-effects in unit tests
-vi.mock('../../src/plugins/hook-manager.js', () => ({
-    getHookManager: () => ({
-        onTaskCreate: vi.fn().mockResolvedValue(undefined),
-        onTaskUpdate: vi.fn().mockResolvedValue(undefined),
-        onTaskComplete: vi.fn().mockResolvedValue(undefined),
-        onTaskDelete: vi.fn().mockResolvedValue(undefined),
-    }),
-}));
-
 let db: Database.Database;
 let ctx: AppContext;
 

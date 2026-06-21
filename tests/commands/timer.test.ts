@@ -14,16 +14,6 @@ import { diffSeconds, parseSqliteUtc } from '../../src/utils/date.js';
 import type { AppContext } from '../../src/commands/context.js';
 import { StatusRepository } from '../../src/storage/repositories/status.repo.js';
 
-// Mock hook manager to suppress async side-effects
-vi.mock('../../src/plugins/hook-manager.js', () => ({
-    getHookManager: () => ({
-        onTaskCreate: vi.fn().mockResolvedValue(undefined),
-        onTaskUpdate: vi.fn().mockResolvedValue(undefined),
-        onTaskComplete: vi.fn().mockResolvedValue(undefined),
-        onTaskDelete: vi.fn().mockResolvedValue(undefined),
-    }),
-}));
-
 // Mock fail so it doesn't set process.exitCode in tests
 vi.mock('../../src/utils/exit.js', () => ({
     EXIT: { OK: 0, GENERIC: 1, USAGE: 2, NOT_FOUND: 3, INVALID_TRANSITION: 4, CONFIG_ERROR: 5 },

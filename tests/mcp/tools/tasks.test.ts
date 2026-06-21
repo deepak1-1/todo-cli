@@ -16,16 +16,6 @@ import { TrackingRepository } from '../../../src/storage/repositories/tracking.r
 import { StatusRepository } from '../../../src/storage/repositories/status.repo.js';
 import type { AppContext } from '../../../src/commands/context.js';
 
-// Mock hook manager to prevent async side-effects during tests
-vi.mock('../../../src/plugins/hook-manager.js', () => ({
-    getHookManager: () => ({
-        onTaskCreate: vi.fn().mockResolvedValue(undefined),
-        onTaskUpdate: vi.fn().mockResolvedValue(undefined),
-        onTaskComplete: vi.fn().mockResolvedValue(undefined),
-        onTaskDelete: vi.fn().mockResolvedValue(undefined),
-    }),
-}));
-
 let db: Database.Database;
 let ctx: AppContext;
 

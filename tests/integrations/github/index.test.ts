@@ -308,17 +308,3 @@ describe('githubProvider.mapToRemote', () => {
     });
 });
 
-// ──────────────────────────────────────────────
-// hooks
-// ──────────────────────────────────────────────
-describe('githubProvider.hooks', () => {
-    it('onTaskComplete resolves without error when task has no githubRef', async () => {
-        const task = { id: 1, githubRef: null } as Task;
-        await expect(githubProvider.hooks?.onTaskComplete?.(task)).resolves.toBeUndefined();
-    });
-
-    it('onTaskComplete resolves without error when task has a githubRef', async () => {
-        const task = { id: 1, githubRef: 'owner/repo#42' } as Task;
-        await expect(githubProvider.hooks?.onTaskComplete?.(task)).resolves.toBeUndefined();
-    });
-});

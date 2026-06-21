@@ -366,17 +366,3 @@ describe('jiraProvider.mapToRemote', () => {
     });
 });
 
-// ──────────────────────────────────────────────
-// hooks
-// ──────────────────────────────────────────────
-describe('jiraProvider.hooks', () => {
-    it('onTaskComplete resolves without error when task has no jiraKey', async () => {
-        const task = { id: 1, jiraKey: null } as Task;
-        await expect(jiraProvider.hooks?.onTaskComplete?.(task)).resolves.toBeUndefined();
-    });
-
-    it('onTaskComplete resolves without error when task has a jiraKey', async () => {
-        const task = { id: 1, jiraKey: 'PROJ-42' } as Task;
-        await expect(jiraProvider.hooks?.onTaskComplete?.(task)).resolves.toBeUndefined();
-    });
-});

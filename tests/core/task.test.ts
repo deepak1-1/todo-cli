@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
     validateCreateInput,
     validateUpdateInput,
-    comparePriority,
 } from '../../src/core/task.js';
 
 describe('validateCreateInput', () => {
@@ -44,16 +43,6 @@ describe('validateUpdateInput', () => {
 
     it('should throw on empty title', () => {
         expect(() => validateUpdateInput({ title: '' })).toThrow('Task title cannot be empty');
-    });
-});
-
-describe('comparePriority', () => {
-    it('should rank urgent higher than low', () => {
-        expect(comparePriority('urgent', 'low')).toBeGreaterThan(0);
-    });
-
-    it('should rank same priorities equal', () => {
-        expect(comparePriority('medium', 'medium')).toBe(0);
     });
 });
 

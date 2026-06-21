@@ -5,11 +5,9 @@
 import { Command } from 'commander';
 import { getContext } from './context.js';
 import { theme } from '../utils/theme.js';
-import { getHookManager } from '../plugins/hook-manager.js';
 import { handleRecurringCompletion, validateUpdateInput } from '../core/task.js';
 import { parseDate } from '../utils/date.js';
 import { success, error, formatStatus, parseId } from '../utils/format.js';
-import { logWarn } from '../utils/logger.js';
 import { fail, EXIT, requireEntity } from '../utils/exit.js';
 import { emitJson } from '../utils/json-output.js';
 import { VALID_RECURRENCES, normalizePriority, PRIORITY_ERROR } from '../core/types.js';
@@ -63,15 +61,6 @@ export function applyEdit(
     }
 
     const updated = ctx.taskRepo.update(id, changes);
-
-    if (updated) {
-        const completingDef = targetStatus ? defs.find(d => d.key === targetStatus) : undefined;
-        if (completingDef?.completes) {
-            getHookManager().onTaskComplete(updated).catch((e) => logWarn(`Hook error: ${e instanceof Error ? e.message : String(e)}`));
-        } else if (Object.keys(changes).length > 0) {
-            getHookManager().onTaskUpdate(updated, changes as Partial<Task>).catch((e) => logWarn(`Hook error: ${e instanceof Error ? e.message : String(e)}`));
-        }
-    }
 
     if (opts.tag && opts.tag.length > 0) {
         const addTags: string[] = [];

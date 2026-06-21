@@ -275,33 +275,6 @@ describe('TrackingRepository.getActiveSessions', () => {
 });
 
 // ----------------------------------------------------------------
-// getActive()
-// ----------------------------------------------------------------
-describe('TrackingRepository.getActive', () => {
-    it('should return null when there are no sessions', () => {
-        expect(trackingRepo.getActive()).toBeNull();
-    });
-
-    it('should return null when all sessions are completed', () => {
-        const task = taskRepo.create({ title: 'Done task' });
-        insertSession(task.id, '2026-04-29 09:00:00', '2026-04-29 09:30:00', 1800);
-
-        expect(trackingRepo.getActive()).toBeNull();
-    });
-
-    it('should return the active session', () => {
-        const task = taskRepo.create({ title: 'Active task' });
-        trackingRepo.start(task.id, 'working');
-
-        const active = trackingRepo.getActive();
-        expect(active).not.toBeNull();
-        expect(active!.taskId).toBe(task.id);
-        expect(active!.endedAt).toBeNull();
-        expect(active!.note).toBe('working');
-    });
-});
-
-// ----------------------------------------------------------------
 // getById()
 // ----------------------------------------------------------------
 describe('TrackingRepository.getById', () => {
@@ -613,9 +586,9 @@ describe('TrackingRepository.reduceSession', () => {
 });
 
 // ----------------------------------------------------------------
-// stop() → getActive() round-trip shape test
+// stop() round-trip shape test
 // ----------------------------------------------------------------
-describe('TrackingRepository stop/getActive shape', () => {
+describe('TrackingRepository stop shape', () => {
     it('should produce a positive duration and SQLite-shaped ended_at after stop()', () => {
         const task = taskRepo.create({ title: 'Shape check' });
         // Insert a session that started 30 seconds ago

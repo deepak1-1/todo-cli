@@ -6,7 +6,6 @@ import {
     type Task,
     type CreateTaskInput,
     type UpdateTaskInput,
-    type TaskPriority,
     TASK_PRIORITIES,
 } from './types.js';
 import { getNextOccurrence } from './scheduler.js';
@@ -57,12 +56,6 @@ export function validateUpdateInput(input: UpdateTaskInput): UpdateTaskInput {
     }
 
     return normalized;
-}
-
-/** Priority comparison (higher priority = higher number) */
-export function comparePriority(a: TaskPriority, b: TaskPriority): number {
-    const order: Record<TaskPriority, number> = { urgent: 4, high: 3, medium: 2, low: 1 };
-    return order[a] - order[b];
 }
 
 /**

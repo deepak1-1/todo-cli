@@ -5,22 +5,19 @@
 import { Command } from 'commander';
 import { getContext } from './context.js';
 import { theme } from '../utils/theme.js';
-import { getHookManager } from '../plugins/hook-manager.js';
 import { success, parseId } from '../utils/format.js';
-import { logWarn } from '../utils/logger.js';
 import { fail, EXIT, requireEntity } from '../utils/exit.js';
 import { emitJson } from '../utils/json-output.js';
 import type { Task } from '../core/types.js';
 import type { AppContext } from './context.js';
 
-/** Pure mutating core for delete: archive or hard-delete, fire hook, action-log. Throws if not found. */
+/** Pure mutating core for delete: archive or hard-delete, action-log. Throws if not found. */
 export function applyDelete(ctx: AppContext, id: number, opts?: { force?: boolean }): { task: Task } {
     const task = ctx.taskRepo.getById(id);
     if (!task) throw new Error(`Task #${id} not found`);
 
     if (opts?.force) {
         ctx.taskRepo.delete(id);
-        getHookManager().onTaskDelete(task).catch((e) => logWarn(`Hook error: ${e instanceof Error ? e.message : String(e)}`));
         ctx.actionLog.log({
             taskId: id,
             action: 'hard_delete',
@@ -30,7 +27,6 @@ export function applyDelete(ctx: AppContext, id: number, opts?: { force?: boolea
         });
     } else {
         ctx.taskRepo.archive(id);
-        getHookManager().onTaskDelete(task).catch((e) => logWarn(`Hook error: ${e instanceof Error ? e.message : String(e)}`));
         // Retrieve archive status key from registry for the action log
         const archiveKey = ctx.statusRepo.list().find(d => d.archives)?.key ?? 'archived';
         ctx.actionLog.log({

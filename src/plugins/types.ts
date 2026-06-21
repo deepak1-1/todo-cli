@@ -2,11 +2,8 @@
 // Plugin System Types
 // ============================================================
 
-import { Task, CreateTaskInput, TaskFilters, TaskStatus, Project, Tag } from '../core/types.js';
+import { Task, CreateTaskInput, TaskStatus } from '../core/types.js';
 import type { StatusDef } from '../core/status.js';
-
-// Plugin-safe subset of Task fields — excludes immutable identity and timestamp fields.
-export type SafeTaskUpdate = Partial<Pick<Task, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'dueDate' | 'jiraKey' | 'jiraId' | 'githubRef' | 'lastSyncedAt' | 'syncHash'>>;
 
 export interface ExternalTask {
     externalId: string;
@@ -64,13 +61,6 @@ export interface PluginCommand {
     action: (...args: unknown[]) => Promise<void>;
 }
 
-export interface PluginHooks {
-    onTaskCreate?(task: Task): Promise<void>;
-    onTaskUpdate?(task: Task, changes: Partial<Task>): Promise<void>;
-    onTaskComplete?(task: Task): Promise<void>;
-    onTaskDelete?(task: Task): Promise<void>;
-}
-
 export interface IntegrationProvider {
     readonly name: string;
     readonly displayName: string;
@@ -85,7 +75,6 @@ export interface IntegrationProvider {
     mapToRemote(task: Task): Record<string, unknown>;
 
     commands?(): PluginCommand[];
-    hooks?: PluginHooks;
 }
 
 export interface PluginManifest {
@@ -104,18 +93,4 @@ export interface RegisteredPlugin {
     provider: IntegrationProvider;
     enabled: boolean;
     path?: string;
-}
-
-export interface PluginAPI {
-    getTasks(filters?: TaskFilters): Promise<Task[]>;
-    getTask(id: number): Promise<Task | null>;
-    createTask(input: CreateTaskInput): Promise<Task>;
-    updateTask(id: number, changes: SafeTaskUpdate): Promise<Task | null>;
-    getProjects(): Promise<Project[]>;
-    getTags(): Promise<Tag[]>;
-    getConfig<T>(key: string): Promise<T | null>;
-    setConfig<T>(key: string, value: T): Promise<void>;
-    credentials: CredentialStore;
-    notify(message: string, type: 'info' | 'success' | 'warning' | 'error'): void;
-    log: PluginLogger;
 }

@@ -12,7 +12,6 @@ import {
     PullFilters,
     PushResult,
     PluginCommand,
-    PluginHooks,
 } from '../../plugins/types.js';
 import { createPluginLogger } from '../../plugins/plugin-logger.js';
 import { JiraClient } from './jira-client.js';
@@ -301,17 +300,6 @@ const jiraProvider: IntegrationProvider = {
     commands(): PluginCommand[] {
         return [];
     },
-
-    hooks: {
-        onTaskComplete: async (task: Task): Promise<void> => {
-            if (!task.jiraKey) {
-                return;
-            }
-
-            logger.debug(`Task completed: ${task.id} (${task.jiraKey})`);
-            // Hook implementation handled by core
-        },
-    } as PluginHooks,
 };
 
 export const manifest = {

@@ -13,7 +13,6 @@ import {
     PullFilters,
     PushResult,
     PluginCommand,
-    PluginHooks,
 } from '../../plugins/types.js';
 import { createPluginLogger } from '../../plugins/plugin-logger.js';
 import { GitHubClient } from './github-client.js';
@@ -212,16 +211,6 @@ const githubProvider: IntegrationProvider = {
     commands(): PluginCommand[] {
         return [];
     },
-
-    hooks: {
-        onTaskComplete: async (task: Task): Promise<void> => {
-            if (!task.githubRef) {
-                return;
-            }
-
-            logger.debug(`Task completed: ${task.id} (${task.githubRef})`);
-        },
-    } as PluginHooks,
 };
 
 export const manifest = {

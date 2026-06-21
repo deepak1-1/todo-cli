@@ -15,15 +15,6 @@ import type { AppContext } from '../../src/commands/context.js';
 import { buildStatusCommands } from '../../src/commands/status-commands.js';
 import { applyEdit } from '../../src/commands/edit.js';
 
-vi.mock('../../src/plugins/hook-manager.js', () => ({
-    getHookManager: () => ({
-        onTaskCreate: vi.fn().mockResolvedValue(undefined),
-        onTaskUpdate: vi.fn().mockResolvedValue(undefined),
-        onTaskComplete: vi.fn().mockResolvedValue(undefined),
-        onTaskDelete: vi.fn().mockResolvedValue(undefined),
-    }),
-}));
-
 let db: Database.Database;
 let ctx: AppContext;
 

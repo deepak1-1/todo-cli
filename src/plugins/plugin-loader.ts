@@ -120,7 +120,3 @@ export async function loadAll(): Promise<void> {
     await loadLocal();
     await loadGlobal();
 }
-
-export async function installPlugin(_name: string): Promise<void> {
-    throw new Error('Plugin installation not yet implemented');
-}

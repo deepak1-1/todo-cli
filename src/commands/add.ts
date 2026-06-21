@@ -5,11 +5,9 @@
 import { Command } from 'commander';
 import { getContext } from './context.js';
 import { theme } from '../utils/theme.js';
-import { getHookManager } from '../plugins/hook-manager.js';
 import { validateCreateInput } from '../core/task.js';
 import { parseDate, formatDateDisplay } from '../utils/date.js';
 import { success, formatPriorityLabel, parseIds as parseIdList } from '../utils/format.js';
-import { logWarn } from '../utils/logger.js';
 import { fail, EXIT } from '../utils/exit.js';
 import { emitJson } from '../utils/json-output.js';
 import { VALID_RECURRENCES, normalizePriority, PRIORITY_ERROR } from '../core/types.js';
@@ -26,7 +24,7 @@ export interface ApplyAddInput {
     tags?: string[];
 }
 
-/** Pure mutating core: validate, create, hook, action-log. Throws on invalid input. */
+/** Pure mutating core: validate, create, action-log. Throws on invalid input. */
 export function applyAdd(ctx: AppContext, input: ApplyAddInput): { task: Task } {
     const validated = validateCreateInput({
         title: input.title,
@@ -38,7 +36,6 @@ export function applyAdd(ctx: AppContext, input: ApplyAddInput): { task: Task } 
     });
 
     const task = ctx.taskRepo.create(validated);
-    getHookManager().onTaskCreate(task).catch((e) => logWarn(`Hook error: ${e instanceof Error ? e.message : String(e)}`));
 
     if (input.tags && input.tags.length > 0) {
         ctx.tagRepo.setTaskTags(task.id, input.tags);

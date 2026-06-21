@@ -110,15 +110,6 @@ export class TrackingRepository {
         return rows.map(mapRow);
     }
 
-    /** Get the first active session (for backward compatibility) */
-    getActive(): TrackingSession | null {
-        const row = this.db.prepare(
-            'SELECT * FROM time_tracking WHERE ended_at IS NULL LIMIT 1'
-        ).get() as TrackingSessionRow | undefined;
-
-        return row ? mapRow(row) : null;
-    }
-
     /** Get a session by ID */
     getById(id: number): TrackingSession | null {
         const row = this.db.prepare(
