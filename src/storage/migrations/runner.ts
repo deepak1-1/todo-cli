@@ -13,7 +13,11 @@ import * as migration007 from './007-drop-unused.js';
 
 interface Migration {
     name: string;
-    up: (db: Database.Database) => void;
+    /**
+     * Apply the migration. Self-managed migrations may call markApplied() inside their own
+     * transaction to record completion atomically with their schema change.
+     */
+    up: (db: Database.Database, markApplied?: () => void) => void;
     down: (db: Database.Database) => void;
     /** If true, migration manages its own transaction (e.g. needs PRAGMA foreign_keys = OFF) */
     requiresNoTransaction?: boolean;
@@ -72,10 +76,17 @@ export function runMigrations(db: Database.Database): string[] {
         runTx();
     }
 
-    // Run self-managed migrations outside any transaction (they handle their own)
+    // Run self-managed migrations outside any transaction (they handle their own).
+    // A migration may call markApplied() inside its own transaction to record completion
+    // atomically with its schema change; otherwise the runner records it afterwards.
     for (const migration of selfManaged) {
-        migration.up(db);
-        db.prepare('INSERT INTO _migrations (name) VALUES (?)').run(migration.name);
+        let recorded = false;
+        const markApplied = () => {
+            db.prepare('INSERT INTO _migrations (name) VALUES (?)').run(migration.name);
+            recorded = true;
+        };
+        migration.up(db, markApplied);
+        if (!recorded) markApplied();
         appliedNames.push(migration.name);
     }
 

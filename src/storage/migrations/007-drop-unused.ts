@@ -10,7 +10,7 @@ import type Database from 'better-sqlite3';
 // are also self-managed; the runner applies transactional migrations first.
 export const requiresNoTransaction = true;
 
-export function up(db: Database.Database): void {
+export function up(db: Database.Database, markApplied?: () => void): void {
     const migrate = db.transaction(() => {
         // gitlab_ref / linear_ref are plain TEXT columns with no index, constraint,
         // or FK — safe to drop directly (SQLite >= 3.35 supports ALTER ... DROP COLUMN).
@@ -20,6 +20,9 @@ export function up(db: Database.Database): void {
             DROP TABLE IF EXISTS integration_config;
             DROP TABLE IF EXISTS pomodoro_sessions;
         `);
+        // Record completion in the same transaction as the (non-idempotent) DROP COLUMNs,
+        // so a crash can never leave the schema changed but the migration unrecorded.
+        markApplied?.();
     });
     migrate();
 }
