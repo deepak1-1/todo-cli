@@ -39,11 +39,13 @@ shipping a local Llama model + Ink TUI, expose the task database as MCP tools.
 
 5. **Task notes + annotations** — per-task markdown note (GitHub-style checklists) +
    timestamped annotations; `006-annotations` migration.
-6. **Snooze/scheduled + effort estimate** — hide a task until a date; effort field feeds
-   urgency & GTD selection.
+6. **Snooze/scheduled + effort estimate + `until`** — hide a task until a date; `until`
+   date auto-drops/expires the task (Taskwarrior parity); effort field feeds urgency & GTD.
 7. **Reminders + `todo agenda` + weekly `todo review`** — desktop notifications via
    notify-send/osascript driven by `todo remind --check`.
-8. **ICS / calendar export** — `todo export --ics` subscribable feed.
+8. **Standards interop (two-way)** — `todo export --ics` subscribable feed, two-way
+   CalDAV/iCal sync (todoman parity — Nextcloud / Apple Reminders / Google Tasks), and
+   todo.txt import/export for migration on/off the tool.
 
 ## Tier 3 — bigger bets & rounding out
 
@@ -59,8 +61,25 @@ shipping a local Llama model + Ink TUI, expose the task database as MCP tools.
 16. **AI-chat depth via MCP** — planning tools ("plan my week", "reschedule overdue") layered
     on the urgency engine.
 
+## Tier 4 — competitive parity (from CLI-landscape survey)
+
+17. **User-Defined Attributes (UDAs) / custom fields** — arbitrary typed fields on a task
+    (Taskwarrior parity); usable in filters, sorts, and urgency coefficients.
+18. **Custom named reports** — saved column-set + filter + sort views invoked as a verb
+    (`todo standup`, `todo waiting`); distinct from contexts (#4), which only scope filters.
+19. **Virtual tags** — auto-computed tags usable in filters: `+OVERDUE`, `+DUETODAY`,
+    `+BLOCKED`, `+ACTIVE`, `+WAITING` (Taskwarrior parity), derived, never stored.
+20. **Hooks / event scripting** — opt-in user scripts on task lifecycle (`on-add`,
+    `on-modify`, `on-exit`); re-introduces, behind a flag, the machinery removed on
+    `refactor/remove-dead-features`. Powers custom automation Taskwarrior users rely on.
+21. **Encryption at rest** — optional encrypted task DB (we already have an encrypted
+    credential store; extend the pattern to task data for privacy parity).
+22. **Mobile / web companion (sync-gated)** — read/light-write access off the terminal
+    (Ultralist Pro parity). Gated behind git-backed sync (#9); longest-horizon item.
+
 ---
 
 Research sources: taskwarrior.org/docs/urgency & /commands, github.com/naggie/dstask,
-github.com/gammons/ultralist, todotxt.org, mcpservers.org, modelcontextprotocol.io,
+github.com/gammons/ultralist, github.com/klaudiosinani/taskbook, github.com/pimutils/todoman,
+todotxt.org, medevel.com/tasks-cli-279, mcpservers.org, modelcontextprotocol.io,
 morgen.so, orgmode.org/worg.
