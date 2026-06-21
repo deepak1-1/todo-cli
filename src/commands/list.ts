@@ -6,7 +6,7 @@ import { Command } from 'commander';
 import { getContext } from './context.js';
 import { theme } from '../utils/theme.js';
 import { formatTaskTable, parseIntOption } from '../utils/format.js';
-import { addFilterOptions, filterAndSearchTasks } from '../utils/filter-options.js';
+import { addFilterOptions, filterAndSearchTasks } from './filter-options.js';
 import { fail, EXIT } from '../utils/exit.js';
 import { emptyStateMessage } from '../utils/empty-state.js';
 

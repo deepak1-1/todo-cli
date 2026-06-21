@@ -5,7 +5,7 @@ import * as readline from 'node:readline';
 import { getContext } from './context.js';
 import { executeEdit } from './edit.js';
 import { formatTaskTable, success } from '../utils/format.js';
-import { addFilterOptions, filterAndSearchTasks, hasAnyFilter } from '../utils/filter-options.js';
+import { addFilterOptions, filterAndSearchTasks, hasAnyFilter } from './filter-options.js';
 import { fail, EXIT } from '../utils/exit.js';
 import { emitJson } from '../utils/json-output.js';
 import { normalizePriority, PRIORITY_ERROR } from '../core/types.js';

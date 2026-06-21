@@ -2,8 +2,8 @@
 import { Command } from 'commander';
 import type { TaskFilters, TaskPriority, TaskSort, TaskWithRelations } from '../core/types.js';
 import { fuzzySearch } from '../core/filter.js';
-import { parseIntOption } from './format.js';
-import type { AppContext } from '../commands/context.js';
+import { parseIntOption } from '../utils/format.js';
+import type { AppContext } from './context.js';
 import { findByKeyOrVerb } from '../core/status.js';
 
 export function addFilterOptions(cmd: Command): Command {

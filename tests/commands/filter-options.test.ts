@@ -9,7 +9,7 @@ import { DependencyRepository } from '../../src/storage/repositories/dependency.
 import { TrackingRepository } from '../../src/storage/repositories/tracking.repo.js';
 import { StatusRepository } from '../../src/storage/repositories/status.repo.js';
 import type { AppContext } from '../../src/commands/context.js';
-import { filterAndSearchTasks } from '../../src/utils/filter-options.js';
+import { filterAndSearchTasks } from '../../src/commands/filter-options.js';
 import type Database from 'better-sqlite3';
 
 let db: Database.Database;
