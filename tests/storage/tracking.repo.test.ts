@@ -5,24 +5,15 @@ import { runMigrations } from '../../src/storage/migrations/runner.js';
 import { TrackingRepository } from '../../src/storage/repositories/tracking.repo.js';
 import { TaskRepository } from '../../src/storage/repositories/task.repo.js';
 import { todayLocal } from '../../src/utils/date.js';
+import { insertTrackingSession } from '../helpers/tracking.js';
 
 let db: Database.Database;
 let trackingRepo: TrackingRepository;
 let taskRepo: TaskRepository;
 
-/** Insert a completed tracking session with explicit timestamps for deterministic tests */
-function insertSession(
-    taskId: number,
-    startedAt: string,
-    endedAt: string | null,
-    duration: number,
-    note = ''
-): number {
-    const result = db.prepare(
-        'INSERT INTO time_tracking (task_id, started_at, ended_at, duration, note) VALUES (?, ?, ?, ?, ?)'
-    ).run(taskId, startedAt, endedAt, duration, note);
-    return Number(result.lastInsertRowid);
-}
+// Local binding over the shared fixture so call sites don't have to pass the per-test db.
+const insertSession = (taskId: number, startedAt: string, endedAt: string | null, duration: number, note = ''): number =>
+    insertTrackingSession(db, taskId, startedAt, endedAt, duration, note);
 
 beforeEach(() => {
     db = createTestDb();
@@ -649,5 +640,167 @@ describe('TrackingRepository.getToday', () => {
 
         const sessions = trackingRepo.getToday();
         expect(sessions).toHaveLength(1);
+    });
+});
+
+// ----------------------------------------------------------------
+// getTimeSpentInRange()
+// ----------------------------------------------------------------
+describe('TrackingRepository.getTimeSpentInRange', () => {
+    it('returns empty Map for empty taskIds', () => {
+        const result = trackingRepo.getTimeSpentInRange([], '2026-04-01', '2026-04-30');
+        expect(result.size).toBe(0);
+    });
+
+    it('sums duration per task within the date range', () => {
+        const t1 = taskRepo.create({ title: 'Task A' });
+        const t2 = taskRepo.create({ title: 'Task B' });
+        insertSession(t1.id, '2026-04-25 10:00:00', '2026-04-25 10:30:00', 1800);
+        insertSession(t1.id, '2026-04-26 14:00:00', '2026-04-26 14:15:00', 900);
+        insertSession(t2.id, '2026-04-25 11:00:00', '2026-04-25 11:45:00', 2700);
+
+        const result = trackingRepo.getTimeSpentInRange([t1.id, t2.id], '2026-04-24', '2026-04-28');
+
+        expect(result.get(t1.id)).toBe(2700);
+        expect(result.get(t2.id)).toBe(2700);
+    });
+
+    it('excludes sessions outside the date range', () => {
+        const task = taskRepo.create({ title: 'Mixed dates' });
+        insertSession(task.id, '2026-04-20 10:00:00', '2026-04-20 10:30:00', 999);
+        insertSession(task.id, '2026-04-25 10:00:00', '2026-04-25 10:30:00', 1800);
+        insertSession(task.id, '2026-05-01 10:00:00', '2026-05-01 10:30:00', 999);
+
+        const result = trackingRepo.getTimeSpentInRange([task.id], '2026-04-24', '2026-04-28');
+
+        expect(result.get(task.id)).toBe(1800);
+    });
+
+    it('excludes active sessions (ended_at IS NULL)', () => {
+        const task = taskRepo.create({ title: 'Active mix' });
+        insertSession(task.id, '2026-04-25 10:00:00', null, 0);
+        insertSession(task.id, '2026-04-25 14:00:00', '2026-04-25 14:30:00', 600);
+
+        const result = trackingRepo.getTimeSpentInRange([task.id], '2026-04-24', '2026-04-28');
+
+        expect(result.get(task.id)).toBe(600);
+    });
+
+    it('does not include tasks not in the input list', () => {
+        const t1 = taskRepo.create({ title: 'Wanted' });
+        const t2 = taskRepo.create({ title: 'Unwanted' });
+        insertSession(t1.id, '2026-04-25 10:00:00', '2026-04-25 10:30:00', 1800);
+        insertSession(t2.id, '2026-04-25 11:00:00', '2026-04-25 11:30:00', 9999);
+
+        const result = trackingRepo.getTimeSpentInRange([t1.id], '2026-04-24', '2026-04-28');
+
+        expect(result.has(t1.id)).toBe(true);
+        expect(result.has(t2.id)).toBe(false);
+    });
+});
+
+// ----------------------------------------------------------------
+// getSessionsInRange()
+// ----------------------------------------------------------------
+describe('TrackingRepository.getSessionsInRange', () => {
+    it('returns empty Map for empty taskIds', () => {
+        const result = trackingRepo.getSessionsInRange([], '2026-04-01', '2026-04-30');
+        expect(result.size).toBe(0);
+    });
+
+    it('groups sessions by task id across multiple tasks', () => {
+        const t1 = taskRepo.create({ title: 'Task A' });
+        const t2 = taskRepo.create({ title: 'Task B' });
+        insertSession(t1.id, '2026-04-25 10:00:00', '2026-04-25 10:30:00', 1800, 'a1');
+        insertSession(t2.id, '2026-04-26 11:00:00', '2026-04-26 11:45:00', 2700, 'b1');
+        insertSession(t1.id, '2026-04-27 09:00:00', '2026-04-27 09:15:00', 900, 'a2');
+
+        const result = trackingRepo.getSessionsInRange([t1.id, t2.id], '2026-04-24', '2026-04-28');
+
+        expect(result.get(t1.id)).toHaveLength(2);
+        expect(result.get(t2.id)).toHaveLength(1);
+    });
+
+    it('excludes sessions outside the date range', () => {
+        const task = taskRepo.create({ title: 'Date boundary' });
+        insertSession(task.id, '2026-04-22 10:00:00', '2026-04-22 10:30:00', 1800, 'before');
+        insertSession(task.id, '2026-04-25 10:00:00', '2026-04-25 10:30:00', 1800, 'inside');
+        insertSession(task.id, '2026-04-30 10:00:00', '2026-04-30 10:30:00', 1800, 'after');
+
+        const result = trackingRepo.getSessionsInRange([task.id], '2026-04-24', '2026-04-28');
+
+        const sessions = result.get(task.id);
+        expect(sessions).toHaveLength(1);
+        expect(sessions![0].note).toBe('inside');
+    });
+
+    it('includes sessions on the boundary dates', () => {
+        const task = taskRepo.create({ title: 'Boundary dates' });
+        insertSession(task.id, '2026-04-24 10:00:00', '2026-04-24 10:30:00', 1800, 'from-day');
+        insertSession(task.id, '2026-04-28 10:00:00', '2026-04-28 10:30:00', 1800, 'to-day');
+
+        const result = trackingRepo.getSessionsInRange([task.id], '2026-04-24', '2026-04-28');
+
+        expect(result.get(task.id)).toHaveLength(2);
+    });
+
+    it('excludes active sessions (ended_at IS NULL)', () => {
+        const task = taskRepo.create({ title: 'Active mix' });
+        insertSession(task.id, '2026-04-25 10:00:00', null, 0, 'running');
+        insertSession(task.id, '2026-04-25 14:00:00', '2026-04-25 14:30:00', 1800, 'done');
+
+        const result = trackingRepo.getSessionsInRange([task.id], '2026-04-24', '2026-04-28');
+
+        const sessions = result.get(task.id);
+        expect(sessions).toHaveLength(1);
+        expect(sessions![0].note).toBe('done');
+    });
+
+    it('preserves non-empty note and maps empty note to empty string', () => {
+        const task = taskRepo.create({ title: 'Note mapping' });
+        insertSession(task.id, '2026-04-25 10:00:00', '2026-04-25 10:30:00', 1800, 'real note');
+        insertSession(task.id, '2026-04-26 10:00:00', '2026-04-26 10:30:00', 1800, '');
+
+        const result = trackingRepo.getSessionsInRange([task.id], '2026-04-24', '2026-04-28');
+
+        const sessions = result.get(task.id)!;
+        expect(sessions).toHaveLength(2);
+        expect(sessions.some(s => s.note === 'real note')).toBe(true);
+        expect(sessions.some(s => s.note === '')).toBe(true);
+    });
+
+    it('orders sessions ASC by started_at within a task', () => {
+        const task = taskRepo.create({ title: 'Order check' });
+        insertSession(task.id, '2026-04-27 14:00:00', '2026-04-27 14:30:00', 1800, 'third');
+        insertSession(task.id, '2026-04-25 10:00:00', '2026-04-25 10:30:00', 1800, 'first');
+        insertSession(task.id, '2026-04-26 09:00:00', '2026-04-26 09:30:00', 1800, 'second');
+
+        const result = trackingRepo.getSessionsInRange([task.id], '2026-04-24', '2026-04-28');
+
+        const sessions = result.get(task.id)!;
+        expect(sessions[0].note).toBe('first');
+        expect(sessions[1].note).toBe('second');
+        expect(sessions[2].note).toBe('third');
+    });
+
+    it('does not include sessions for tasks not in the input list', () => {
+        const t1 = taskRepo.create({ title: 'Wanted' });
+        const t2 = taskRepo.create({ title: 'Unwanted' });
+        insertSession(t1.id, '2026-04-25 10:00:00', '2026-04-25 10:30:00', 1800);
+        insertSession(t2.id, '2026-04-25 11:00:00', '2026-04-25 11:30:00', 1800);
+
+        const result = trackingRepo.getSessionsInRange([t1.id], '2026-04-24', '2026-04-28');
+
+        expect(result.has(t1.id)).toBe(true);
+        expect(result.has(t2.id)).toBe(false);
+    });
+
+    it('returns empty Map when no sessions fall in the range', () => {
+        const task = taskRepo.create({ title: 'Old task' });
+        insertSession(task.id, '2026-03-01 10:00:00', '2026-03-01 10:30:00', 1800);
+
+        const result = trackingRepo.getSessionsInRange([task.id], '2026-04-01', '2026-04-30');
+
+        expect(result.size).toBe(0);
     });
 });

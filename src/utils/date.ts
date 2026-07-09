@@ -129,6 +129,11 @@ export function diffSeconds(from: string, to: string): number {
     return Math.floor((parseSqliteUtc(to).getTime() - parseSqliteUtc(from).getTime()) / 1000);
 }
 
+/** Compute elapsed seconds since a stored UTC timestamp (defaults to now). */
+export function elapsedSecondsSince(startedAt: string, now?: Date): number {
+    return Math.round(((now ?? new Date()).getTime() - parseSqliteUtc(startedAt).getTime()) / 1000);
+}
+
 /**
  * Parse a relative duration string like "7d", "3m", "1y" and return
  * the resulting Date by subtracting that duration from the given reference date (defaults to now).

@@ -12,6 +12,7 @@ import {
     sqliteUtcFromDate,
     parseSqliteUtc,
     diffSeconds,
+    elapsedSecondsSince,
 } from '../../src/utils/date.js';
 import { format, addDays, subDays, subMonths, subYears } from 'date-fns';
 
@@ -315,5 +316,26 @@ describe('diffSeconds', () => {
 
     it('should handle cross-day spans', () => {
         expect(diffSeconds('2026-03-15 23:59:00', '2026-03-16 00:00:00')).toBe(60);
+    });
+});
+
+
+describe('elapsedSecondsSince', () => {
+    it('returns elapsed seconds from a past SQLite UTC timestamp', () => {
+        const now = new Date('2026-07-09T12:00:00.000Z');
+        const startedAt = '2026-07-09 11:59:00'; // 60s before now
+        expect(elapsedSecondsSince(startedAt, now)).toBe(60);
+    });
+
+    it('returns 0 when startedAt equals now', () => {
+        const now = new Date('2026-07-09T12:00:00.000Z');
+        const startedAt = '2026-07-09 12:00:00';
+        expect(elapsedSecondsSince(startedAt, now)).toBe(0);
+    });
+
+    it('handles ISO string format as startedAt', () => {
+        const now = new Date('2026-07-09T12:00:30.000Z');
+        const startedAt = '2026-07-09T12:00:00.000Z';
+        expect(elapsedSecondsSince(startedAt, now)).toBe(30);
     });
 });

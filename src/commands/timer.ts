@@ -4,29 +4,30 @@ import { Command } from 'commander';
 import { getContext } from './context.js';
 import { makeTable } from '../utils/table.js';
 import { theme } from '../utils/theme.js';
-import { formatLocalDateTime, parseSqliteUtc } from '../utils/date.js';
-import { formatDuration } from '../core/timer.js';
+import { formatLocalDateTime, elapsedSecondsSince } from '../utils/date.js';
+import { formatDuration, parseDuration } from '../core/timer.js';
 import { parseId, parseIntOption } from '../utils/format.js';
 import { fail, EXIT, requireEntity } from '../utils/exit.js';
+import type { AppContext } from './context.js';
+import type { Task } from '../core/types.js';
+import type { TrackingSession } from '../storage/repositories/tracking.repo.js';
+import type { StatusDef } from '../core/status.js';
 
-function parseDuration(input: string): number {
-    // Support formats: 2h, 30m, 1h30m, 1.5h, 90m, 90
-    let total = 0;
-    const hourMatch = input.match(/(\d+(?:\.\d+)?)\s*h/i);
-    const minMatch = input.match(/(\d+)\s*m/i);
-    const secMatch = input.match(/(\d+)\s*s/i);
-
-    if (hourMatch) total += parseFloat(hourMatch[1]) * 3600;
-    if (minMatch) total += parseInt(minMatch[1]) * 60;
-    if (secMatch) total += parseInt(secMatch[1]);
-
-    // If just a number, treat as minutes.
-    if (!hourMatch && !minMatch && !secMatch) {
-        const num = parseFloat(input);
-        if (!isNaN(num)) total = num * 60;
+/** Start a timer on an already-resolved task and optionally advance status todo → in_progress. */
+export function applyTimerStart(
+    ctx: AppContext,
+    task: Task,
+    note?: string,
+): { session: TrackingSession; advancedTo: StatusDef | null } {
+    const session = ctx.trackingRepo.start(task.id, note);
+    const defs = ctx.statusRepo.list();
+    const startDef = defs.find(d => d.verb === 'start') ?? null;
+    const todoKey = defs.find(d => d.verb === 'reopen')?.key ?? 'todo';
+    if (startDef && task.status === todoKey) {
+        ctx.taskRepo.update(task.id, { status: startDef.key });
+        return { session, advancedTo: startDef };
     }
-
-    return Math.round(total);
+    return { session, advancedTo: null };
 }
 
 export const timerCommand = new Command('timer')
@@ -46,7 +47,7 @@ export const timerCommand = new Command('timer')
                 if (!requireEntity(task, 'Task', `#${id}`)) return;
 
                 try {
-                    const session = ctx.trackingRepo.start(id, opts.note);
+                    const { session, advancedTo } = applyTimerStart(ctx, task, opts.note);
                     console.log(t.success.chalk(`✓ Started timer on #${id}: `) + t.title.chalk(task.title));
                     console.log(t.muted.chalk(`  Started at ${formatLocalDateTime(session.startedAt)}`));
 
@@ -62,12 +63,8 @@ export const timerCommand = new Command('timer')
                         console.log(t.muted.chalk(`  Run "todo timer stop" when done`));
                     }
 
-                    // Auto-advance status to the 'start' verb's target key
-                    const startDef = ctx.statusRepo.list().find(d => d.verb === 'start');
-                    const todoKey = ctx.statusRepo.list().find(d => d.verb === 'reopen')?.key ?? 'todo';
-                    if (startDef && task.status === todoKey) {
-                        ctx.taskRepo.update(id, { status: startDef.key });
-                        console.log(t.statusInProgress.chalk(`  Task status → ${startDef.label}`));
+                    if (advancedTo) {
+                        console.log(t.statusInProgress.chalk(`  Task status → ${advancedTo.label}`));
                     }
                 } catch (err: unknown) {
                     const msg = err instanceof Error ? err.message : String(err);
@@ -139,8 +136,7 @@ export const timerCommand = new Command('timer')
 
                 for (const active of sessions) {
                     const task = ctx.taskRepo.getById(active.taskId);
-                    const startTime = parseSqliteUtc(active.startedAt).getTime();
-                    const elapsed = Math.round((Date.now() - startTime) / 1000);
+                    const elapsed = elapsedSecondsSince(active.startedAt);
 
                     console.log(t.accent.chalk(`⏱  Timer: #${active.taskId} `) + t.title.chalk(task?.title || ''));
                     console.log(`  Started:  ${formatLocalDateTime(active.startedAt)}`);

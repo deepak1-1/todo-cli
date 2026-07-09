@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatDuration } from '../../src/core/timer.js';
+import { formatDuration, parseDuration } from '../../src/core/timer.js';
 
 describe('formatDuration', () => {
     it('should format seconds', () => {
@@ -52,6 +52,40 @@ describe('formatDuration', () => {
         // Just verify it does not throw
         expect(() => formatDuration(-1)).not.toThrow();
         expect(() => formatDuration(-1, true)).not.toThrow();
+    });
+});
+
+describe('parseDuration', () => {
+    it('parses hours only: "2h" → 7200', () => {
+        expect(parseDuration('2h')).toBe(7200);
+    });
+
+    it('parses minutes only: "30m" → 1800', () => {
+        expect(parseDuration('30m')).toBe(1800);
+    });
+
+    it('parses combined h+m: "1h30m" → 5400', () => {
+        expect(parseDuration('1h30m')).toBe(5400);
+    });
+
+    it('parses fractional hours: "1.5h" → 5400', () => {
+        expect(parseDuration('1.5h')).toBe(5400);
+    });
+
+    it('parses bare number as minutes: "90" → 5400', () => {
+        expect(parseDuration('90')).toBe(5400);
+    });
+
+    it('parses seconds: "45s" → 45', () => {
+        expect(parseDuration('45s')).toBe(45);
+    });
+
+    it('returns 0 for unrecognised input: "abc"', () => {
+        expect(parseDuration('abc')).toBe(0);
+    });
+
+    it('returns 0 for "0m"', () => {
+        expect(parseDuration('0m')).toBe(0);
     });
 
     it('should handle exact minute boundary with includeSeconds', () => {

@@ -26,6 +26,9 @@ const mapRow = makeMapper<TrackingSessionRow, TrackingSession>({
     note: { col: 'note', transform: stringOrEmpty },
 });
 
+// Shared WHERE predicate for completed sessions within a local-date range (params: from, to).
+const RANGE_ENDED = "ended_at IS NOT NULL AND date(started_at, 'localtime') >= ? AND date(started_at, 'localtime') <= ?";
+
 export class TrackingRepository {
     constructor(private db: Database.Database) {}
 
@@ -173,7 +176,7 @@ export class TrackingRepository {
         const rows = this.db.prepare(`
             SELECT DISTINCT task_id
             FROM time_tracking
-            WHERE date(started_at, 'localtime') >= ? AND date(started_at, 'localtime') <= ? AND ended_at IS NOT NULL
+            WHERE ${RANGE_ENDED}
         `).all(from, to) as { task_id: number }[];
 
         return rows.map(r => r.task_id);
@@ -212,14 +215,32 @@ export class TrackingRepository {
         const rows = this.db.prepare(`
             SELECT task_id, COALESCE(SUM(duration), 0) as total
             FROM time_tracking
-            WHERE task_id IN (${placeholders}) AND ended_at IS NOT NULL
-              AND date(started_at, 'localtime') >= ? AND date(started_at, 'localtime') <= ?
+            WHERE task_id IN (${placeholders}) AND ${RANGE_ENDED}
             GROUP BY task_id
         `).all(...taskIds, from, to) as { task_id: number; total: number }[];
 
         const result = new Map<number, number>();
         for (const row of rows) {
             result.set(row.task_id, row.total);
+        }
+        return result;
+    }
+
+    /** Get full sessions per task within a date range, grouped by task id. */
+    getSessionsInRange(taskIds: number[], from: string, to: string): Map<number, TrackingSession[]> {
+        if (taskIds.length === 0) return new Map();
+        const placeholders = taskIds.map(() => '?').join(',');
+        const rows = this.db.prepare(`
+            SELECT * FROM time_tracking
+            WHERE task_id IN (${placeholders}) AND ${RANGE_ENDED}
+            ORDER BY task_id, started_at ASC
+        `).all(...taskIds, from, to) as TrackingSessionRow[];
+        const result = new Map<number, TrackingSession[]>();
+        for (const row of rows) {
+            const s = mapRow(row);
+            const arr = result.get(s.taskId) ?? [];
+            arr.push(s);
+            result.set(s.taskId, arr);
         }
         return result;
     }
