@@ -133,7 +133,7 @@ export interface TaskFilters {
     status?: TaskStatus | TaskStatus[];
     priority?: TaskPriority | TaskPriority[];
     projectId?: number;
-    projectName?: string;
+    projectName?: string | null; // null = no project (project_id IS NULL)
     tags?: string[];
     dueBefore?: string;
     dueAfter?: string;

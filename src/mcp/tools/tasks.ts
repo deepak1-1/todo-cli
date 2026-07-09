@@ -7,29 +7,14 @@ import { applyEdit } from '../../commands/edit.js';
 import { applyDelete } from '../../commands/delete.js';
 import { getContext } from '../../commands/context.js';
 import { normalizePriority, TASK_PRIORITIES, VALID_RECURRENCES } from '../../core/types.js';
-import { findByKeyOrVerb } from '../../core/status.js';
+import { findByKeyOrVerb, validStatusKeys } from '../../core/status.js';
 import { parseDate } from '../../utils/date.js';
 import { fuzzySearch } from '../../core/filter.js';
 import type { TaskFilters, TaskSort, EditOptions } from '../../core/types.js';
+import { ok, err } from './shared.js';
 
 const prioritySchema = z.enum(['urgent', 'high', 'medium', 'low']).optional();
 const recurrenceSchema = z.enum(['daily', 'weekly', 'biweekly', 'monthly', 'yearly']).optional();
-
-/** Return shape: text summary + structured JSON content. Arrays are wrapped under `items` so structuredContent is always a JSON object (MCP spec). */
-function ok(data: unknown, summary: string) {
-    return {
-        content: [{ type: 'text' as const, text: summary }],
-        structuredContent: Array.isArray(data) ? { items: data } : (data as Record<string, unknown>),
-    };
-}
-
-/** Return shape for errors. */
-function err(message: string) {
-    return {
-        content: [{ type: 'text' as const, text: message }],
-        isError: true as const,
-    };
-}
 
 export function registerTaskTools(server: McpServer, opts: { allowDelete: boolean }): void {
     // ── todo_add_task ──────────────────────────────────────────────────
@@ -166,8 +151,7 @@ export function registerTaskTools(server: McpServer, opts: { allowDelete: boolea
                 const defs = ctx.statusRepo.list();
                 const def = findByKeyOrVerb(defs, args.status);
                 if (!def) {
-                    const valid = defs.map(d => d.key).join(', ');
-                    return err(`Invalid status "${args.status}". Valid: ${valid}`);
+                    return err(`Invalid status "${args.status}". Valid: ${validStatusKeys(defs)}`);
                 }
                 const { task } = applyEdit(ctx, args.id, { status: def.key });
                 return ok(task, `Task #${task.id} is now "${def.label}"`);
@@ -218,7 +202,7 @@ export function registerTaskTools(server: McpServer, opts: { allowDelete: boolea
             inputSchema: {
                 status: z.union([z.string(), z.array(z.string())]).optional().describe('Filter by status key(s)'),
                 priority: z.union([z.enum(['urgent', 'high', 'medium', 'low']), z.array(z.enum(['urgent', 'high', 'medium', 'low']))]).optional().describe('Filter by priority'),
-                projectName: z.string().optional().describe('Filter by project name'),
+                projectName: z.string().optional().describe('Filter by project name (empty string = tasks without a project)'),
                 tags: z.array(z.string()).optional().describe('Filter by tags'),
                 search: z.string().optional().describe('Full-text search'),
                 dueDate: z.string().optional().describe('"today", "overdue", "this-week", or ISO date'),
@@ -234,9 +218,19 @@ export function registerTaskTools(server: McpServer, opts: { allowDelete: boolea
             try {
                 const ctx = getContext();
                 const filters: TaskFilters = {};
-                if (args.status !== undefined) filters.status = args.status as TaskFilters['status'];
+                if (args.status !== undefined) {
+                    const defs = ctx.statusRepo.list();
+                    const rawStatuses = Array.isArray(args.status) ? args.status : [args.status];
+                    const resolved: string[] = [];
+                    for (const s of rawStatuses) {
+                        const def = findByKeyOrVerb(defs, s);
+                        if (!def) return err(`Invalid status "${s}". Valid: ${validStatusKeys(defs)}`);
+                        resolved.push(def.key);
+                    }
+                    filters.status = resolved.length === 1 ? resolved[0] : resolved;
+                }
                 if (args.priority !== undefined) filters.priority = args.priority as TaskFilters['priority'];
-                if (args.projectName !== undefined) filters.projectName = args.projectName;
+                if (args.projectName !== undefined) filters.projectName = args.projectName === '' ? null : args.projectName;
                 if (args.tags !== undefined) filters.tags = args.tags;
                 if (args.dueDate !== undefined) filters.dueDate = args.dueDate;
                 if (args.dueBefore !== undefined) filters.dueBefore = args.dueBefore;

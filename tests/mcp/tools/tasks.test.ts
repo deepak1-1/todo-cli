@@ -7,54 +7,17 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type Database from 'better-sqlite3';
 import { createTestDb } from '../../../src/storage/database.js';
 import { runMigrations } from '../../../src/storage/migrations/runner.js';
-import { TaskRepository } from '../../../src/storage/repositories/task.repo.js';
-import { ProjectRepository } from '../../../src/storage/repositories/project.repo.js';
-import { TagRepository } from '../../../src/storage/repositories/tag.repo.js';
-import { ActionLogRepository } from '../../../src/storage/repositories/action-log.repo.js';
-import { DependencyRepository } from '../../../src/storage/repositories/dependency.repo.js';
-import { TrackingRepository } from '../../../src/storage/repositories/tracking.repo.js';
-import { StatusRepository } from '../../../src/storage/repositories/status.repo.js';
 import type { AppContext } from '../../../src/commands/context.js';
+import { buildTestCtx, buildStubServer } from '../../helpers/mcp.js';
+import type { StubServer } from '../../helpers/mcp.js';
 
 let db: Database.Database;
 let ctx: AppContext;
-
-function buildCtx(database: Database.Database): AppContext {
-    return {
-        taskRepo: new TaskRepository(database),
-        projectRepo: new ProjectRepository(database),
-        tagRepo: new TagRepository(database),
-        actionLog: new ActionLogRepository(database),
-        depRepo: new DependencyRepository(database),
-        trackingRepo: new TrackingRepository(database),
-        statusRepo: new StatusRepository(database),
-    };
-}
 
 // Wire ctx into getContext so MCP tool handlers use the test DB
 vi.mock('../../../src/commands/context.js', () => ({
     getContext: () => ctx,
 }));
-
-// Minimal McpServer stub: captures registered handlers by tool name
-// so tests can invoke them directly without a real MCP transport.
-type HandlerFn = (args: Record<string, unknown>) => unknown;
-
-function buildStubServer() {
-    const handlers: Record<string, HandlerFn> = {};
-    return {
-        registerTool(name: string, _meta: unknown, handler: HandlerFn) {
-            handlers[name] = handler;
-        },
-        call(name: string, args: Record<string, unknown>) {
-            const fn = handlers[name];
-            if (!fn) throw new Error(`Tool "${name}" not registered`);
-            return fn(args);
-        },
-    };
-}
-
-type StubServer = ReturnType<typeof buildStubServer>;
 
 let server: StubServer;
 
@@ -62,7 +25,7 @@ beforeEach(() => {
     vi.resetModules();
     db = createTestDb();
     runMigrations(db);
-    ctx = buildCtx(db);
+    ctx = buildTestCtx(db);
     server = buildStubServer();
 });
 
@@ -741,6 +704,32 @@ describe('todo_list_tasks — extended coverage', () => {
         expect(tasks).toHaveLength(0);
     });
 
+    it('filters by project name', async () => {
+        const project = ctx.projectRepo.create({ name: 'Work' });
+        ctx.taskRepo.create({ title: 'In project', projectId: project.id });
+        ctx.taskRepo.create({ title: 'No project' });
+        await loadTools();
+
+        const result = server.call('todo_list_tasks', { projectName: 'Work' }) as Record<string, unknown>;
+        const tasks = (result.structuredContent as { items: Array<Record<string, unknown>> }).items;
+
+        expect(tasks).toHaveLength(1);
+        expect(tasks[0].title).toBe('In project');
+    });
+
+    it('empty projectName filters to tasks without a project', async () => {
+        const project = ctx.projectRepo.create({ name: 'Work' });
+        ctx.taskRepo.create({ title: 'In project', projectId: project.id });
+        ctx.taskRepo.create({ title: 'No project' });
+        await loadTools();
+
+        const result = server.call('todo_list_tasks', { projectName: '' }) as Record<string, unknown>;
+        const tasks = (result.structuredContent as { items: Array<Record<string, unknown>> }).items;
+
+        expect(tasks).toHaveLength(1);
+        expect(tasks[0].title).toBe('No project');
+    });
+
     it('respects sortField and sortDirection', async () => {
         ctx.taskRepo.create({ title: 'Alpha task', priority: 'low' });
         ctx.taskRepo.create({ title: 'Zeta task', priority: 'urgent' });
@@ -752,6 +741,21 @@ describe('todo_list_tasks — extended coverage', () => {
         expect(tasks.length).toBeGreaterThanOrEqual(2);
         const titles = tasks.map((t) => t.title as string);
         expect(titles[0]).toBe('Alpha task');
+    });
+
+    it('empty projectName combined with status filter returns only matching projectless tasks', async () => {
+        const project = ctx.projectRepo.create({ name: 'Work' });
+        const t1 = ctx.taskRepo.create({ title: 'No project todo' });
+        const t2 = ctx.taskRepo.create({ title: 'No project done' });
+        ctx.taskRepo.create({ title: 'In project todo', projectId: project.id });
+        ctx.taskRepo.update(t2.id, { status: 'done', completedAt: new Date().toISOString() });
+        await loadTools();
+
+        const result = server.call('todo_list_tasks', { projectName: '', status: 'todo' }) as Record<string, unknown>;
+        const tasks = (result.structuredContent as { items: Array<Record<string, unknown>> }).items;
+
+        expect(tasks).toHaveLength(1);
+        expect(tasks[0].id).toBe(t1.id);
     });
 });
 
@@ -782,6 +786,101 @@ describe('todo_set_status — verb matching', () => {
 
         expect(result).not.toHaveProperty('isError');
         expect(ctx.taskRepo.getById(task.id)?.status).toBe('in_progress');
+    });
+});
+
+// ─── todo_set_status — hyphenated status normalization ───────────────────────
+describe('todo_set_status — hyphenated status normalization', () => {
+    it('accepts "in-progress" (hyphen) and transitions to in_progress', async () => {
+        const task = ctx.taskRepo.create({ title: 'Hyphen status task', priority: 'medium' });
+        await loadTools();
+
+        const result = server.call('todo_set_status', { id: task.id, status: 'in-progress' }) as Record<string, unknown>;
+
+        expect(result).not.toHaveProperty('isError');
+        expect(ctx.taskRepo.getById(task.id)?.status).toBe('in_progress');
+    });
+
+    it('accepts "IN-PROGRESS" (all caps hyphen) and transitions to in_progress', async () => {
+        const task = ctx.taskRepo.create({ title: 'Caps hyphen task', priority: 'medium' });
+        await loadTools();
+
+        const result = server.call('todo_set_status', { id: task.id, status: 'IN-PROGRESS' }) as Record<string, unknown>;
+
+        expect(result).not.toHaveProperty('isError');
+        expect(ctx.taskRepo.getById(task.id)?.status).toBe('in_progress');
+    });
+
+    it('returns isError for a completely unknown status (not just hyphen-variant)', async () => {
+        const task = ctx.taskRepo.create({ title: 'Unknown status task', priority: 'medium' });
+        await loadTools();
+
+        const result = server.call('todo_set_status', { id: task.id, status: 'bogus-status' }) as Record<string, unknown>;
+
+        expect(result).toHaveProperty('isError', true);
+        const content = (result.content as Array<{ text: string }>)[0];
+        expect(content.text).toMatch(/invalid status/i);
+    });
+});
+
+// ─── todo_list_tasks — hyphenated status normalization ───────────────────────
+describe('todo_list_tasks — hyphenated status normalization', () => {
+    it('status:"in-progress" resolves and returns in_progress tasks', async () => {
+        const t1 = ctx.taskRepo.create({ title: 'In progress task', priority: 'medium' });
+        ctx.taskRepo.update(t1.id, { status: 'in_progress' });
+        ctx.taskRepo.create({ title: 'Todo task', priority: 'low' });
+        await loadTools();
+
+        const result = server.call('todo_list_tasks', { status: 'in-progress' }) as Record<string, unknown>;
+
+        expect(result).not.toHaveProperty('isError');
+        const tasks = (result.structuredContent as { items: Array<Record<string, unknown>> }).items;
+        expect(tasks).toHaveLength(1);
+        expect(tasks[0].id).toBe(t1.id);
+    });
+
+    it('status:"IN-PROGRESS" (all caps hyphen) resolves and returns exactly the in_progress task (no leakage)', async () => {
+        const t1 = ctx.taskRepo.create({ title: 'Caps check task', priority: 'high' });
+        ctx.taskRepo.update(t1.id, { status: 'in_progress' });
+        // Create a todo task that must NOT appear in the result
+        ctx.taskRepo.create({ title: 'Todo task', priority: 'low' });
+        await loadTools();
+
+        const result = server.call('todo_list_tasks', { status: 'IN-PROGRESS' }) as Record<string, unknown>;
+
+        expect(result).not.toHaveProperty('isError');
+        const tasks = (result.structuredContent as { items: Array<Record<string, unknown>> }).items;
+        // Exactly one result and it is the in_progress task — not the todo task
+        expect(tasks).toHaveLength(1);
+        expect(tasks[0].id).toBe(t1.id);
+    });
+
+    it('unknown status returns the err shape (not an empty list)', async () => {
+        ctx.taskRepo.create({ title: 'Some task', priority: 'medium' });
+        await loadTools();
+
+        const result = server.call('todo_list_tasks', { status: 'completely-bogus' }) as Record<string, unknown>;
+
+        expect(result).toHaveProperty('isError', true);
+        const content = (result.content as Array<{ text: string }>)[0];
+        expect(content.text).toMatch(/invalid status/i);
+    });
+
+    it('array of statuses including hyphen variant resolves correctly', async () => {
+        const t1 = ctx.taskRepo.create({ title: 'In progress task', priority: 'medium' });
+        ctx.taskRepo.update(t1.id, { status: 'in_progress' });
+        const t2 = ctx.taskRepo.create({ title: 'Done task', priority: 'medium' });
+        ctx.taskRepo.update(t2.id, { status: 'done', completedAt: new Date().toISOString() });
+        await loadTools();
+
+        // Pass an array with a hyphen-variant
+        const result = server.call('todo_list_tasks', { status: ['in-progress', 'done'] }) as Record<string, unknown>;
+
+        expect(result).not.toHaveProperty('isError');
+        const tasks = (result.structuredContent as { items: Array<Record<string, unknown>> }).items;
+        const ids = tasks.map((t) => t.id);
+        expect(ids).toContain(t1.id);
+        expect(ids).toContain(t2.id);
     });
 });
 
@@ -849,6 +948,37 @@ describe('todo_add_task — empty tag rejection', () => {
 
         expect(result).toHaveProperty('isError', true);
         expect(ctx.tagRepo.list()).toHaveLength(0);
+    });
+});
+
+// ─── create with terminal status — completedAt in structuredContent ───────────
+// The MCP tool doesn't expose status as input to todo_add_task, but when a task is
+// created via the repo with a terminal status (e.g. from Jira import or the CLI
+// add --status done path), todo_get_task must surface the completedAt field.
+describe('todo_get_task — completedAt present when task was created with done status', () => {
+    it('structuredContent.completedAt is non-null for a task created with status:done', async () => {
+        // Simulate Jira import or CLI add --status done via repo (the fix point)
+        const task = ctx.taskRepo.create({ title: 'Pre-done task', status: 'done' });
+        await loadTools();
+
+        const result = server.call('todo_get_task', { id: task.id }) as Record<string, unknown>;
+
+        expect(result).not.toHaveProperty('isError');
+        const structured = result.structuredContent as Record<string, unknown>;
+        // completedAt must be set — would fail if task.repo.create() did not stamp it
+        expect(structured.completedAt).not.toBeNull();
+        expect(structured.completedAt).toBeDefined();
+    });
+
+    it('structuredContent.completedAt is null for a task created with status:todo', async () => {
+        const task = ctx.taskRepo.create({ title: 'Not done yet', status: 'todo' });
+        await loadTools();
+
+        const result = server.call('todo_get_task', { id: task.id }) as Record<string, unknown>;
+
+        expect(result).not.toHaveProperty('isError');
+        const structured = result.structuredContent as Record<string, unknown>;
+        expect(structured.completedAt).toBeNull();
     });
 });
 

@@ -7,11 +7,14 @@ import { formatDuration } from '../core/timer.js';
 import { PRIORITY_ORDER } from '../core/types.js';
 import type { TaskFilters } from '../core/types.js';
 import { fuzzySearch } from '../core/filter.js';
-import { parseRelativeDuration, formatDateDisplay, todayLocal, toLocalDateString } from '../utils/date.js';
+import { parseRelativeDuration, formatDateDisplay, todayLocal, toLocalDateString, parseSqliteUtc } from '../utils/date.js';
+import type { TrackingSession } from '../storage/repositories/tracking.repo.js';
 import { priorityChalkFn, statusChalkFn } from '../utils/format.js';
 import { theme } from '../utils/theme.js';
 import { fail, EXIT } from '../utils/exit.js';
 import { emptyStateMessage } from '../utils/empty-state.js';
+import { resolveStatusOrThrow } from '../core/status.js';
+import { applyProjectFilter } from './filter-options.js';
 
 // Status labels are loaded dynamically from the registry
 
@@ -67,15 +70,17 @@ export const statsCommand = new Command('stats')
     .option('--from <date>', 'Start date (YYYY-MM-DD)')
     .option('--to <date>', 'End date (YYYY-MM-DD)')
     .option('-S, --status <key>', 'Filter by status key')
-    .option('-P, --project <name>', 'Filter by project')
+    .option('-P, --project <name>', 'Filter by project ("none" for tasks without a project)')
     .option('-t, --tag <tags...>', 'Filter by tag')
     .option('-s, --search <query>', 'Fuzzy search tasks')
+    .option('--notes', 'Show session notes per task')
     .option('--json', 'Output as JSON')
     .addHelpText('after', `
 Examples:
   $ todo stats --last 7d
   $ todo stats --from 2026-06-01 --to 2026-06-14
-  $ todo stats --monthly --project "My App"`)
+  $ todo stats --monthly --project "My App"
+  $ todo stats --last 7d --notes`)
     .action((opts) => {
         const ctx = getContext();
         const t = theme();
@@ -88,7 +93,16 @@ Examples:
         }
 
         const statuses: string[] = [];
-        if (opts.status) statuses.push(opts.status as string);
+        if (opts.status) {
+            const defs = ctx.statusRepo.list();
+            let resolvedKey: string;
+            try {
+                resolvedKey = resolveStatusOrThrow(defs, opts.status as string).key;
+            } catch (e: unknown) {
+                return fail(EXIT.USAGE, e instanceof Error ? e.message : String(e));
+            }
+            statuses.push(resolvedKey);
+        }
 
         const workedTaskIds = ctx.trackingRepo.getTaskIdsWorkedInRange(from, to);
 
@@ -109,7 +123,7 @@ Examples:
             includeArchived: true,
         };
         if (statuses.length > 0) filters.status = statuses;
-        if (opts.project) filters.projectName = opts.project;
+        applyProjectFilter(filters, opts.project);
         if (opts.tag) filters.tags = opts.tag;
 
         let tasks = ctx.taskRepo.list(filters);
@@ -129,6 +143,9 @@ Examples:
         const taskIds = tasks.map(tk => tk.id);
         const workedDatesMap = ctx.trackingRepo.getWorkedDates(taskIds, from, to);
         const timeInRangeMap = ctx.trackingRepo.getTimeSpentInRange(taskIds, from, to);
+        const sessionsMap = (opts.notes || opts.json)
+            ? ctx.trackingRepo.getSessionsInRange(taskIds, from, to)
+            : new Map<number, TrackingSession[]>();
 
         const defs = ctx.statusRepo.list();
         const statusCounts: Record<string, number> = {};
@@ -142,7 +159,15 @@ Examples:
         };
 
         if (opts.json) {
-            console.log(JSON.stringify({ from, to, summary, tasks }, null, 2));
+            const tasksJson = tasks.map(tk => ({
+                ...tk,
+                sessions: (sessionsMap.get(tk.id) ?? []).map(s => ({
+                    date: toLocalDateString(parseSqliteUtc(s.startedAt)),
+                    duration: s.duration,
+                    note: s.note,
+                })),
+            }));
+            console.log(JSON.stringify({ from, to, summary, tasks: tasksJson }, null, 2));
             return;
         }
 
@@ -184,6 +209,29 @@ Examples:
         }
 
         console.log(table.toString());
+
+        if (opts.notes) {
+            console.log(`\n  ${t.heading.chalk('Notes')}`);
+            console.log(t.muted.chalk('  ─────────────────────────────────────────'));
+            let hasAnyNote = false;
+            for (const tk of tasks) {
+                const sessions = (sessionsMap.get(tk.id) ?? []).filter(s => s.note.trim() !== '');
+                if (sessions.length === 0) continue;
+                hasAnyNote = true;
+                console.log(`  ${t.id.chalk(`#${tk.id}`)} ${t.title.chalk(tk.title)}`);
+                const displayed = sessions.slice(0, 10);
+                for (const s of displayed) {
+                    const dateStr = formatDateDisplay(toLocalDateString(parseSqliteUtc(s.startedAt)));
+                    console.log(`    ${dateStr} (${formatDuration(s.duration)})${t.muted.chalk(` — ${s.note}`)}`);
+                }
+                if (sessions.length > 10) {
+                    console.log(t.muted.chalk(`    ... and ${sessions.length - 10} more sessions`));
+                }
+            }
+            if (!hasAnyNote) {
+                console.log(t.muted.chalk('  No session notes in this range'));
+            }
+        }
 
         console.log(`\n  ${t.heading.chalk('Summary')}`);
         console.log(t.muted.chalk('  ─────────────────────────────────────────'));

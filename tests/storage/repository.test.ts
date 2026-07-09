@@ -6,6 +6,8 @@ import { TaskRepository } from '../../src/storage/repositories/task.repo.js';
 import { ProjectRepository } from '../../src/storage/repositories/project.repo.js';
 import { TagRepository } from '../../src/storage/repositories/tag.repo.js';
 import { DependencyRepository } from '../../src/storage/repositories/dependency.repo.js';
+import { StatusRepository } from '../../src/storage/repositories/status.repo.js';
+import { getTransitionTimestamps } from '../../src/core/status.js';
 
 let db: Database.Database;
 let taskRepo: TaskRepository;
@@ -61,6 +63,52 @@ describe('TaskRepository', () => {
         const urgent = taskRepo.list({ priority: 'urgent' });
         expect(urgent).toHaveLength(1);
         expect(urgent[0].priority).toBe('urgent');
+    });
+
+    it('should filter by project name', () => {
+        const project = projectRepo.create({ name: 'Work' });
+        taskRepo.create({ title: 'In project', projectId: project.id });
+        taskRepo.create({ title: 'No project' });
+
+        const inProject = taskRepo.list({ projectName: 'Work' });
+        expect(inProject).toHaveLength(1);
+        expect(inProject[0].title).toBe('In project');
+    });
+
+    it('should filter tasks without a project via projectName: null', () => {
+        const project = projectRepo.create({ name: 'Work' });
+        taskRepo.create({ title: 'In project', projectId: project.id });
+        taskRepo.create({ title: 'No project' });
+
+        const orphans = taskRepo.list({ projectName: null });
+        expect(orphans).toHaveLength(1);
+        expect(orphans[0].title).toBe('No project');
+    });
+
+    it('query: projectName: null combined with priority filter returns correct intersection', () => {
+        const project = projectRepo.create({ name: 'Work' });
+        taskRepo.create({ title: 'In project urgent', projectId: project.id, priority: 'urgent' });
+        taskRepo.create({ title: 'No project urgent', priority: 'urgent' });
+        taskRepo.create({ title: 'No project low', priority: 'low' });
+
+        const results = taskRepo.list({ projectName: null, priority: 'urgent' });
+        expect(results).toHaveLength(1);
+        expect(results[0].title).toBe('No project urgent');
+    });
+
+    it('query: projectName: null with includeArchived returns archived projectless tasks', () => {
+        const project = projectRepo.create({ name: 'Work' });
+        taskRepo.create({ title: 'Active no project' });
+        const archived = taskRepo.create({ title: 'Archived no project' });
+        taskRepo.archive(archived.id);
+        taskRepo.create({ title: 'In project', projectId: project.id });
+
+        const results = taskRepo.list({ projectName: null, includeArchived: true });
+        // Both active and archived projectless tasks should appear
+        expect(results).toHaveLength(2);
+        const titles = results.map(r => r.title);
+        expect(titles).toContain('Active no project');
+        expect(titles).toContain('Archived no project');
     });
 
     it('should update a task', () => {
@@ -143,6 +191,61 @@ describe('TaskRepository', () => {
         const results = taskRepo.searchBasic('100%');
         expect(results).toHaveLength(1);
         expect(results[0].title).toBe('100% complete');
+    });
+});
+
+// ─── TaskRepository.create() — terminal-status timestamp stamping ───────────────
+describe('TaskRepository.create() — completed_at / archived_at stamping', () => {
+    it('create with status:done stamps completed_at (non-NULL) and leaves archived_at NULL', () => {
+        const task = taskRepo.create({ title: 'Done on create', status: 'done' });
+        expect(task.completedAt).not.toBeNull();
+        expect(task.archivedAt).toBeNull();
+    });
+
+    it('create with status:archived stamps archived_at (non-NULL) and leaves completed_at NULL', () => {
+        const task = taskRepo.create({ title: 'Archived on create', status: 'archived' });
+        expect(task.archivedAt).not.toBeNull();
+        expect(task.completedAt).toBeNull();
+    });
+
+    it('create with status:todo leaves both completed_at and archived_at NULL', () => {
+        const task = taskRepo.create({ title: 'Todo task', status: 'todo' });
+        expect(task.completedAt).toBeNull();
+        expect(task.archivedAt).toBeNull();
+    });
+
+    it('create with default status (omitted) leaves both timestamps NULL', () => {
+        const task = taskRepo.create({ title: 'Default status task' });
+        expect(task.completedAt).toBeNull();
+        expect(task.archivedAt).toBeNull();
+    });
+
+    it('create with status:in_progress leaves both timestamps NULL', () => {
+        const task = taskRepo.create({ title: 'In progress task', status: 'in_progress' });
+        expect(task.completedAt).toBeNull();
+        expect(task.archivedAt).toBeNull();
+    });
+
+    it('completed_at is an ISO 8601 string when stamped', () => {
+        const task = taskRepo.create({ title: 'Done ISO', status: 'done' });
+        expect(task.completedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    });
+
+    it('archived_at is an ISO 8601 string when stamped', () => {
+        const task = taskRepo.create({ title: 'Archived ISO', status: 'archived' });
+        expect(task.archivedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    });
+
+    // The load-bearing reconcile path: a stale done task reopened to todo must clear completed_at.
+    it('update done→todo with getTransitionTimestamps clears completed_at', () => {
+        const defs = new StatusRepository(db).list();
+        const done = taskRepo.create({ title: 'Mistaken done', status: 'done' });
+        expect(done.completedAt).not.toBeNull();
+
+        const reopened = taskRepo.update(done.id, { status: 'todo', ...getTransitionTimestamps(defs, 'todo') });
+        expect(reopened?.status).toBe('todo');
+        expect(reopened?.completedAt).toBeNull();
+        expect(reopened?.archivedAt).toBeNull();
     });
 });
 

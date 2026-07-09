@@ -88,18 +88,6 @@ export class TaskRepository {
         syncHash?: string; lastSyncedAt?: string;
         status?: string;
     }): Task {
-        const sql = `INSERT INTO tasks (
-            title, description, status, priority,
-            project_id, due_date, recurrence,
-            jira_key, jira_id, github_ref,
-            sync_hash, last_synced_at, parent_id
-        ) VALUES (
-            @title, @description, @status, @priority,
-            @projectId, @dueDate, @recurrence,
-            @jiraKey, @jiraId, @githubRef,
-            @syncHash, @lastSyncedAt, @parentId
-        )`;
-
         // Ensure all values are SQLite-bindable (string, number, buffer, or null)
         const safe = (v: unknown): string | number | null => {
             if (v === undefined || v === null) return null;
@@ -109,10 +97,34 @@ export class TaskRepository {
             return String(v);
         };
 
+        const statusKey = (safe(input.status) as string | null) || 'todo';
+
+        // Stamp completion/archive timestamps when created with a terminal status.
+        const statusInfo = this.db.prepare(
+            'SELECT completes, archives FROM statuses WHERE key = ? LIMIT 1',
+        ).get(statusKey) as { completes: number; archives: number } | undefined;
+        const now = new Date().toISOString();
+        const completedAt = statusInfo?.completes ? now : null;
+        const archivedAt = statusInfo?.archives ? now : null;
+
+        const sql = `INSERT INTO tasks (
+            title, description, status, priority,
+            project_id, due_date, recurrence,
+            jira_key, jira_id, github_ref,
+            sync_hash, last_synced_at, parent_id,
+            completed_at, archived_at
+        ) VALUES (
+            @title, @description, @status, @priority,
+            @projectId, @dueDate, @recurrence,
+            @jiraKey, @jiraId, @githubRef,
+            @syncHash, @lastSyncedAt, @parentId,
+            @completedAt, @archivedAt
+        )`;
+
         const params = {
             title: safe(input.title) || '',
             description: safe(input.description) || '',
-            status: safe(input.status) || 'todo',
+            status: statusKey,
             priority: safe(input.priority) || 'medium',
             projectId: safe(input.projectId),
             dueDate: safe(input.dueDate),
@@ -123,6 +135,8 @@ export class TaskRepository {
             syncHash: safe(input.syncHash),
             lastSyncedAt: safe(input.lastSyncedAt),
             parentId: safe(input.parentId),
+            completedAt,
+            archivedAt,
         };
 
         const result = this.db.prepare(sql).run(params);
@@ -226,7 +240,9 @@ export class TaskRepository {
                 params.push(filters.projectId);
             }
 
-            if (filters.projectName) {
+            if (filters.projectName === null) {
+                conditions.push('t.project_id IS NULL');
+            } else if (filters.projectName) {
                 conditions.push('p.name = ?');
                 params.push(filters.projectName);
             }
