@@ -35,8 +35,56 @@ export function getTransitionTimestamps(
     return { completedAt: null, archivedAt: null };
 }
 
-/** Find a StatusDef by key or verb. Returns undefined if not found. */
+/** Normalize a status input: lowercase and replace hyphens with underscores. */
+export function normalizeStatusInput(s: string): string {
+    return s.toLowerCase().replace(/-/g, '_');
+}
+
+/** Find a StatusDef by key or verb (hyphen/underscore/case-insensitive). Returns undefined if not found. */
 export function findByKeyOrVerb(defs: StatusDef[], input: string): StatusDef | undefined {
-    const lower = input.toLowerCase();
-    return defs.find(d => d.key === lower || d.verb === lower);
+    const norm = normalizeStatusInput(input);
+    return defs.find(d => d.key === norm || d.verb === norm);
+}
+
+/** Returns a comma-separated list of valid status keys for error messages. */
+export function validStatusKeys(defs: StatusDef[]): string {
+    return defs.map(d => d.key).join(', ');
+}
+
+/** Resolve a status by key/verb or throw with a clear error listing valid keys. */
+export function resolveStatusOrThrow(defs: StatusDef[], input: string): StatusDef {
+    const def = findByKeyOrVerb(defs, input);
+    if (!def) throw new Error(`Invalid status "${input}". Valid statuses: ${validStatusKeys(defs)}`);
+    return def;
+}
+
+/** Remote-side status signal for a pulled issue. */
+export interface RemoteStatus {
+    /** Local status key the remote maps to when active (Jira). Omit when unknown (GitHub open). */
+    activeTarget?: string;
+    /** True if the remote considers the item done/closed. */
+    isTerminal: boolean;
+}
+
+/**
+ * Decide the new local status when a pulled remote item already exists locally.
+ * v1 = Case A only: recover a mistaken local completion (remote active but local terminal).
+ * Returns the target status key, or null to leave the local status unchanged.
+ * reopenTarget is the caller-resolved active fallback (used when the remote has no concrete target).
+ */
+export function reconcilePulledStatus(
+    defs: StatusDef[],
+    localStatus: string,
+    remote: RemoteStatus,
+    reopenTarget: string,
+): string | null {
+    if (!remote.isTerminal && (isComplete(defs, localStatus) || isArchived(defs, localStatus))) {
+        // Fall back to the (always-valid) reopen target if the remote's target isn't a known local status,
+        // so the chosen key is registry-backed and getTransitionTimestamps clears completed_at correctly.
+        if (remote.activeTarget && defs.some(d => d.key === remote.activeTarget)) {
+            return remote.activeTarget;
+        }
+        return reopenTarget;
+    }
+    return null;
 }

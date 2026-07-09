@@ -13,7 +13,7 @@ import { emitJson } from '../utils/json-output.js';
 import { VALID_RECURRENCES, normalizePriority, PRIORITY_ERROR } from '../core/types.js';
 import type { Task, TaskPriority, RecurrencePattern, EditOptions } from '../core/types.js';
 import type { AppContext } from './context.js';
-import { findByKeyOrVerb, getTransitionTimestamps } from '../core/status.js';
+import { findByKeyOrVerb, getTransitionTimestamps, validStatusKeys } from '../core/status.js';
 import { format } from 'date-fns';
 
 /** Pure mutating core for edit: validate, apply, hook, log. Throws on invalid input. */
@@ -148,8 +148,7 @@ export function executeEdit(id: number, opts: EditOptions, { silent = false, jso
     if (opts.status) {
         const statusDef = findByKeyOrVerb(defs, opts.status);
         if (!statusDef) {
-            const validKeys = defs.map(d => d.key).join(', ');
-            return fail(EXIT.USAGE, `Invalid status "${opts.status}". Valid statuses: ${validKeys}`, { json, command: 'edit' });
+            return fail(EXIT.USAGE, `Invalid status "${opts.status}". Valid statuses: ${validStatusKeys(defs)}`, { json, command: 'edit' });
         }
     }
 

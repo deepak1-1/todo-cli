@@ -81,6 +81,20 @@ describe('StatusRepository.getByKeyOrVerb', () => {
         expect(repo.getByKeyOrVerb('DONE')?.key).toBe('done');
         expect(repo.getByKeyOrVerb('Review')?.key).toBe('in_review');
     });
+
+    it('resolves hyphen variant "in-progress" to in_progress (normalizes - to _)', () => {
+        const def = repo.getByKeyOrVerb('in-progress');
+        expect(def?.key).toBe('in_progress');
+    });
+
+    it('resolves "IN-PROGRESS" (all-caps hyphen) to in_progress', () => {
+        const def = repo.getByKeyOrVerb('IN-PROGRESS');
+        expect(def?.key).toBe('in_progress');
+    });
+
+    it('returns undefined for a hyphen variant that is not a valid key', () => {
+        expect(repo.getByKeyOrVerb('in-qa')).toBeUndefined();
+    });
 });
 
 // ──────────────────────────────────────────────

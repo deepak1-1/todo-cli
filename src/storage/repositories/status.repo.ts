@@ -2,6 +2,7 @@
 
 import type Database from 'better-sqlite3';
 import type { StatusDef } from '../../core/status.js';
+import { normalizeStatusInput } from '../../core/status.js';
 
 interface StatusRow {
     key: string;
@@ -49,12 +50,12 @@ export class StatusRepository {
         this.cache = null;
     }
 
-    /** Find by key or verb. */
+    /** Find by key or verb (hyphen/underscore/case-insensitive). */
     getByKeyOrVerb(input: string): StatusDef | undefined {
-        const lower = input.toLowerCase();
+        const norm = normalizeStatusInput(input);
         const row = this.db.prepare(
             'SELECT key, label, icon, color, sort_order, verb, completes, archives, is_builtin FROM statuses WHERE key = ? OR verb = ? LIMIT 1',
-        ).get(lower, lower) as StatusRow | undefined;
+        ).get(norm, norm) as StatusRow | undefined;
         return row ? mapRow(row) : undefined;
     }
 

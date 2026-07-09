@@ -6,6 +6,9 @@ import {
     isComplete,
     isArchived,
     getTransitionTimestamps,
+    validStatusKeys,
+    resolveStatusOrThrow,
+    reconcilePulledStatus,
 } from '../../src/core/status.js';
 import type { StatusDef } from '../../src/core/status.js';
 
@@ -69,6 +72,95 @@ describe('findByKeyOrVerb', () => {
 
     it('returns undefined for empty defs array', () => {
         expect(findByKeyOrVerb([], 'done')).toBeUndefined();
+    });
+
+    it('resolves hyphenated input to underscore key — in-progress → in_progress', () => {
+        expect(findByKeyOrVerb(DEFS, 'in-progress')?.key).toBe('in_progress');
+    });
+
+    it('resolves all-caps hyphenated — IN-PROGRESS → in_progress', () => {
+        expect(findByKeyOrVerb(DEFS, 'IN-PROGRESS')?.key).toBe('in_progress');
+    });
+
+    it('resolves mixed-case hyphenated — In-Progress → in_progress', () => {
+        expect(findByKeyOrVerb(DEFS, 'In-Progress')?.key).toBe('in_progress');
+    });
+
+    it('resolves underscore key with mixed case — In_Progress → in_progress', () => {
+        expect(findByKeyOrVerb(DEFS, 'In_Progress')?.key).toBe('in_progress');
+    });
+
+    it('finds by exact underscore key — in_progress → in_progress', () => {
+        expect(findByKeyOrVerb(DEFS, 'in_progress')?.key).toBe('in_progress');
+    });
+
+    it('verb still resolves after normalization — start → in_progress', () => {
+        expect(findByKeyOrVerb(DEFS, 'start')?.key).toBe('in_progress');
+    });
+
+    it('returns undefined for unknown hyphenated input — in-review-extra', () => {
+        expect(findByKeyOrVerb(DEFS, 'in-review-extra')).toBeUndefined();
+    });
+});
+
+describe('validStatusKeys', () => {
+    it('returns comma-separated list of all status keys', () => {
+        const result = validStatusKeys(DEFS);
+        expect(result).toBe('todo, in_progress, in_review, blocked, done, archived');
+    });
+
+    it('returns empty string for empty defs array', () => {
+        expect(validStatusKeys([])).toBe('');
+    });
+
+    it('contains each expected key in the returned string', () => {
+        const result = validStatusKeys(DEFS);
+        for (const def of DEFS) {
+            expect(result).toContain(def.key);
+        }
+    });
+});
+
+describe('resolveStatusOrThrow', () => {
+    it('returns the StatusDef when key matches exactly', () => {
+        const def = resolveStatusOrThrow(DEFS, 'done');
+        expect(def.key).toBe('done');
+        expect(def.completes).toBe(true);
+    });
+
+    it('returns the StatusDef when hyphenated input matches — in-progress', () => {
+        const def = resolveStatusOrThrow(DEFS, 'in-progress');
+        expect(def.key).toBe('in_progress');
+    });
+
+    it('returns the StatusDef when verb matches — start → in_progress', () => {
+        const def = resolveStatusOrThrow(DEFS, 'start');
+        expect(def.key).toBe('in_progress');
+    });
+
+    it('throws with message listing all valid keys on unknown input', () => {
+        expect(() => resolveStatusOrThrow(DEFS, 'bogus')).toThrow(
+            'Invalid status "bogus". Valid statuses: todo, in_progress, in_review, blocked, done, archived',
+        );
+    });
+
+    it('throws mentioning the exact bad value', () => {
+        expect(() => resolveStatusOrThrow(DEFS, 'flying')).toThrow(/Invalid status "flying"/);
+    });
+
+    it('throw message lists all expected keys', () => {
+        try {
+            resolveStatusOrThrow(DEFS, 'bogus');
+        } catch (e: unknown) {
+            const msg = (e as Error).message;
+            for (const def of DEFS) {
+                expect(msg).toContain(def.key);
+            }
+        }
+    });
+
+    it('throws for empty defs — no valid statuses to list', () => {
+        expect(() => resolveStatusOrThrow([], 'done')).toThrow('Invalid status "done"');
     });
 });
 
@@ -175,5 +267,51 @@ describe('getTransitionTimestamps', () => {
     it('archivedAt is ISO 8601 when set', () => {
         const ts = getTransitionTimestamps(DEFS, 'archived');
         expect(ts.archivedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    });
+});
+
+describe('reconcilePulledStatus', () => {
+    // Case A: remote active + local terminal → reopen.
+    it('GitHub open + local done → reopen target (todo)', () => {
+        expect(reconcilePulledStatus(DEFS, 'done', { isTerminal: false }, 'todo')).toBe('todo');
+    });
+
+    it('GitHub open + local archived → reopen target', () => {
+        expect(reconcilePulledStatus(DEFS, 'archived', { isTerminal: false }, 'todo')).toBe('todo');
+    });
+
+    it('Jira active concrete target (in_progress) + local done → in_progress', () => {
+        expect(reconcilePulledStatus(DEFS, 'done', { activeTarget: 'in_progress', isTerminal: false }, 'todo')).toBe('in_progress');
+    });
+
+    it('honors a custom/renamed reopen target when remote has no concrete target', () => {
+        // e.g. a user whose active "reopen" status key is "backlog"
+        expect(reconcilePulledStatus(DEFS, 'done', { isTerminal: false }, 'backlog')).toBe('backlog');
+    });
+
+    it('falls back to reopenTarget when activeTarget is not a known local status', () => {
+        // Jira maps to a status the local registry does not have → use the valid reopen target.
+        expect(reconcilePulledStatus(DEFS, 'done', { activeTarget: 'Selected for Dev', isTerminal: false }, 'todo')).toBe('todo');
+    });
+
+    // Null cases: never clobber active local state, never auto-complete.
+    it('GitHub open + local in_progress → null (never downgrade active work)', () => {
+        expect(reconcilePulledStatus(DEFS, 'in_progress', { isTerminal: false }, 'todo')).toBeNull();
+    });
+
+    it('GitHub open + local in_review → null', () => {
+        expect(reconcilePulledStatus(DEFS, 'in_review', { isTerminal: false }, 'todo')).toBeNull();
+    });
+
+    it('GitHub open + local todo → null', () => {
+        expect(reconcilePulledStatus(DEFS, 'todo', { isTerminal: false }, 'todo')).toBeNull();
+    });
+
+    it('remote terminal + local done → null (never auto-complete / no-op)', () => {
+        expect(reconcilePulledStatus(DEFS, 'done', { isTerminal: true }, 'todo')).toBeNull();
+    });
+
+    it('remote terminal + local in_progress → null (no auto-complete on pull)', () => {
+        expect(reconcilePulledStatus(DEFS, 'in_progress', { isTerminal: true }, 'todo')).toBeNull();
     });
 });

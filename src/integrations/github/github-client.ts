@@ -135,7 +135,7 @@ export class GitHubClient {
                 '--assignee', '@me',
                 '--state', 'open',
                 '--limit', '100',
-                '--json', 'id,number,title,body,state,labels,milestone,assignees,url',
+                '--json', 'number,title,body,state,labels,milestone,assignees,url',
             ];
 
             if (filters.labels && filters.labels.length > 0) {
@@ -145,7 +145,6 @@ export class GitHubClient {
             }
 
             const issues = await this.gh<Array<{
-                id: string;
                 number: number;
                 title: string;
                 body: string;
@@ -157,12 +156,8 @@ export class GitHubClient {
             }>>(args);
 
             return issues.map(issue => {
-                const parsedId = Number.parseInt(issue.id, 10);
-                if (!Number.isInteger(parsedId) || parsedId <= 0) {
-                    throw new Error(`Invalid GitHub issue id: ${issue.id}`);
-                }
                 return {
-                    id: parsedId,
+                    id: issue.number,
                     number: issue.number,
                     title: issue.title,
                     body: issue.body || null,
@@ -219,7 +214,6 @@ export class GitHubClient {
     /** Get a single issue */
     async getIssue(owner: string, repo: string, number: number): Promise<GitHubIssue> {
         const result = await this.gh<{
-            id: string;
             number: number;
             title: string;
             body: string;
@@ -231,15 +225,11 @@ export class GitHubClient {
         }>([
             'issue', 'view', String(number),
             '--repo', `${owner}/${repo}`,
-            '--json', 'id,number,title,body,state,labels,milestone,assignees,url',
+            '--json', 'number,title,body,state,labels,milestone,assignees,url',
         ]);
 
-        const parsedId = Number.parseInt(result.id, 10);
-        if (!Number.isInteger(parsedId) || parsedId <= 0) {
-            throw new Error(`Invalid GitHub issue id: ${result.id}`);
-        }
         return {
-            id: parsedId,
+            id: result.number,
             number: result.number,
             title: result.title,
             body: result.body || null,

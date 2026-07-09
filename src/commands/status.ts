@@ -43,7 +43,7 @@ statusCommand
         }
 
         const table = makeTable({
-            head: ['Key', 'Label', 'Icon', 'Verb', 'Completes', 'Archives', 'Builtin'],
+            head: ['Key', 'Label', 'Icon', 'Command', 'Completes', 'Archives', 'Builtin'],
             style: { head: [t.tableHeader.ink], border: [t.tableBorder.ink] },
         });
         for (const d of defs) {

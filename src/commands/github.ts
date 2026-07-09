@@ -2,6 +2,8 @@
 
 import { Command } from 'commander';
 import { getContext } from './context.js';
+import type { AppContext } from './context.js';
+import { reconcilePulledStatus, getTransitionTimestamps } from '../core/status.js';
 import { makeTable } from '../utils/table.js';
 import { theme } from '../utils/theme.js';
 import type { ExternalTask, RegisteredPlugin } from '../plugins/index.js';
@@ -9,9 +11,6 @@ import { GitHubClient } from '../integrations/github/github-client.js';
 import { parseGitHubRef } from '../integrations/github/ref.js';
 import { importRemoteTasks } from '../integrations/shared/import-tasks.js';
 import { createPluginLogger } from '../plugins/plugin-logger.js';
-import type { TaskRepository } from '../storage/repositories/task.repo.js';
-import type { ProjectRepository } from '../storage/repositories/project.repo.js';
-import type { TagRepository } from '../storage/repositories/tag.repo.js';
 import * as logger from '../utils/logger.js';
 import { success, parseId } from '../utils/format.js';
 import { fail, EXIT } from '../utils/exit.js';
@@ -20,20 +19,29 @@ import { runIntegrationCommand } from './_integration-runner.js';
 
 const ghLogger = createPluginLogger('github');
 
-/** Import GitHub issues as local tasks, skipping already-imported ones. Returns { created, skipped }. */
+interface GitHubPullOpts {
+    syncStatus?: boolean;
+    dryRun?: boolean;
+    json?: boolean;
+}
+
+/** Import GitHub issues as local tasks. Skips existing ones unless syncStatus reconciles their status. */
 function importGitHubIssues(
     issues: ExternalTask[],
     plugin: RegisteredPlugin,
-    taskRepo: TaskRepository,
-    projectRepo: ProjectRepository,
-    tagRepo: TagRepository,
-): { created: number; skipped: number } {
+    ctx: AppContext,
+    pullOpts: GitHubPullOpts = {},
+): { created: number; updated: number; skipped: number } {
+    const t = theme();
+    const defs = ctx.statusRepo.list();
+    const reopenTarget = defs.find(d => d.verb === 'reopen')?.key ?? 'todo';
     return importRemoteTasks({
         issues,
         plugin,
-        taskRepo,
-        projectRepo,
-        findExisting: (issue) => taskRepo.findByGithubRef(issue.externalRef),
+        taskRepo: ctx.taskRepo,
+        projectRepo: ctx.projectRepo,
+        dryRun: pullOpts.dryRun ?? false,
+        findExisting: (issue) => ctx.taskRepo.findByGithubRef(issue.externalRef),
         projectName: (issue) => issue.project,
         projectDescription: (issue) => `GitHub: ${issue.externalRef.split('#')[0]}`,
         buildInput: (issue, mapped, projectId) => ({
@@ -46,10 +54,50 @@ function importGitHubIssues(
         }),
         onCreated: (taskId, _issue, mapped) => {
             if (mapped.tags && mapped.tags.length > 0) {
-                tagRepo.addTaskTags(taskId, mapped.tags);
+                ctx.tagRepo.addTaskTags(taskId, mapped.tags);
             }
         },
+        onWouldCreate: pullOpts.json ? undefined : (issue) => {
+            console.log(`  ${t.success.chalk('+')} ${issue.externalRef} — ${issue.title}`);
+        },
+        reconcileExisting: pullOpts.syncStatus
+            ? (existing, issue, _mapped, dry) => {
+                const target = reconcilePulledStatus(
+                    defs, existing.status, { isTerminal: issue.status === 'closed' }, reopenTarget,
+                );
+                if (!target || target === existing.status) return false;
+                if (dry) {
+                    if (!pullOpts.json) {
+                        console.log(`  ${t.warning.chalk('~')} #${existing.id} ${existing.status} → ${target}  ${issue.title.substring(0, 40)}`);
+                    }
+                    return true;
+                }
+                ctx.taskRepo.update(existing.id, { status: target, ...getTransitionTimestamps(defs, target) });
+                ctx.actionLog.log({
+                    taskId: existing.id,
+                    action: `status_${target}`,
+                    entityType: 'task',
+                    prevState: JSON.stringify({ status: existing.status }),
+                    newState: JSON.stringify({ status: target }),
+                });
+                return true;
+            }
+            : undefined,
     });
+}
+
+/** Count existing local tasks whose status the remote would reconcile (for the --sync-status hint). */
+function countReconcilableGitHub(ctx: AppContext, issues: ExternalTask[]): number {
+    const defs = ctx.statusRepo.list();
+    const reopenTarget = defs.find(d => d.verb === 'reopen')?.key ?? 'todo';
+    let n = 0;
+    for (const issue of issues) {
+        const existing = ctx.taskRepo.findByGithubRef(issue.externalRef);
+        if (existing && reconcilePulledStatus(defs, existing.status, { isTerminal: issue.status === 'closed' }, reopenTarget)) {
+            n++;
+        }
+    }
+    return n;
 }
 
 export const githubCommand = new Command('gh')
@@ -90,7 +138,8 @@ githubCommand
     .description('Pull assigned GitHub issues as local tasks')
     .option('--repo <owner/repo>', 'Filter by repository')
     .option('--label <label>', 'Filter by label')
-    .option('--dry-run', 'Show what would be imported without creating tasks')
+    .option('--sync-status', 'Reconcile status of already-imported tasks (reopen ones mistakenly marked done)')
+    .option('--dry-run', 'Show what would be imported/updated without writing')
     .option('--json', 'Output as JSON')
     .action(async (opts) => {
         await runIntegrationCommand('github', { errorPrefix: 'Pull failed' }, async ({ plugin, credStore, ctx }) => {
@@ -106,38 +155,40 @@ githubCommand
 
             if (issues.length === 0) {
                 if (opts.json) {
-                    emitJson({ ok: true, command: 'gh pull', data: { pulled: 0, created: 0, skipped: 0 } });
+                    emitJson({ ok: true, command: 'gh pull', data: { pulled: 0, created: 0, updated: 0, skipped: 0 } });
                 } else {
                     console.log(t.muted.chalk('No issues found'));
                 }
                 return;
             }
 
-            if (opts.dryRun) {
-                let wouldCreate = 0;
-                let alreadyExist = 0;
-                for (const issue of issues) {
-                    if (ctx.taskRepo.findByGithubRef(issue.externalRef)) {
-                        alreadyExist++;
-                    } else {
-                        if (!opts.json) console.log(`  ${t.success.chalk('+')} ${issue.externalRef} — ${issue.title}`);
-                        wouldCreate++;
-                    }
+            const syncStatus = !!opts.syncStatus;
+            const dryRun = !!opts.dryRun;
+            const { created, updated, skipped } = importGitHubIssues(
+                issues, plugin, ctx, { syncStatus, dryRun, json: !!opts.json },
+            );
+
+            // Discoverability: when not syncing, tell the user how many stale tasks could be reconciled.
+            if (!syncStatus && !opts.json) {
+                const reconcilable = countReconcilableGitHub(ctx, issues);
+                if (reconcilable > 0) {
+                    console.log(t.warning.chalk(
+                        `${reconcilable} of these are active on GitHub but completed locally — run with --sync-status to reconcile.`,
+                    ));
                 }
-                if (opts.json) {
-                    emitJson({ ok: true, command: 'gh pull', data: { dryRun: true, wouldCreate, alreadyExist } });
+            }
+
+            if (opts.json) {
+                if (dryRun) {
+                    emitJson({ ok: true, command: 'gh pull', data: { dryRun: true, wouldCreate: created, wouldUpdate: updated, wouldSkip: skipped } });
                 } else {
-                    console.log(t.muted.chalk(`\nDry run: ${wouldCreate} issues would be imported, ${alreadyExist} already exist`));
+                    emitJson({ ok: true, command: 'gh pull', data: { pulled: issues.length, created, updated, skipped } });
                 }
                 return;
             }
 
-            const { created, skipped } = importGitHubIssues(
-                issues, plugin, ctx.taskRepo, ctx.projectRepo, ctx.tagRepo,
-            );
-
-            if (opts.json) {
-                emitJson({ ok: true, command: 'gh pull', data: { pulled: issues.length, created, skipped } });
+            if (dryRun) {
+                console.log(t.muted.chalk(`\nDry run: ${created} would be imported, ${updated} would be updated, ${skipped} unchanged`));
                 return;
             }
 
@@ -156,7 +207,7 @@ githubCommand
             }
 
             console.log(table.toString());
-            console.log(success(`Created ${created} tasks, skipped ${skipped} (already imported)`));
+            console.log(success(`Created ${created} tasks, updated ${updated}, skipped ${skipped} (already imported)`));
         })();
     });
 
@@ -318,9 +369,7 @@ githubCommand
         logger.log('Syncing with GitHub...');
 
         const issues = await plugin.provider.pull(credStore, {});
-        const { created: pulled } = importGitHubIssues(
-            issues, plugin, ctx.taskRepo, ctx.projectRepo, ctx.tagRepo,
-        );
+        const { created: pulled } = importGitHubIssues(issues, plugin, ctx);
 
         // Push tasks with non-archived statuses; pass defs so terminal check is registry-driven
         const statusDefs = ctx.statusRepo.list();

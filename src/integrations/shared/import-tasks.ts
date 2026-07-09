@@ -26,11 +26,23 @@ export interface ImportRemoteTasksOptions {
     onCreated?: (taskId: number, issue: ExternalTask, mapped: MappedTask) => void;
     /** Optional per-issue error handler; when set, a thrown error is caught and reported instead of aborting. */
     onError?: (issue: ExternalTask, err: unknown) => void;
+    /**
+     * Reconcile an already-existing local task against the pulled issue.
+     * Return true iff a write occurred (or, in dryRun, would occur) — counted as `updated`; else `skipped`.
+     * In dryRun it MUST NOT perform any DB write (evaluate only).
+     */
+    reconcileExisting?: (existing: Task, issue: ExternalTask, mapped: MappedTask, dryRun: boolean) => boolean;
+    /** Optional preview hook for a would-be-created issue (dryRun only). */
+    onWouldCreate?: (issue: ExternalTask) => void;
+    /** When true, counts only — performs no DB writes (no project/task creation, no reconcile writes). Default false. */
+    dryRun?: boolean;
 }
 
-export function importRemoteTasks(opts: ImportRemoteTasksOptions): { created: number; skipped: number } {
+export function importRemoteTasks(opts: ImportRemoteTasksOptions): { created: number; updated: number; skipped: number } {
     let created = 0;
+    let updated = 0;
     let skipped = 0;
+    const dryRun = opts.dryRun ?? false;
     const projectCache = new Map<string, number>();
 
     const resolveProjectId = (issue: ExternalTask): number | undefined => {
@@ -45,8 +57,21 @@ export function importRemoteTasks(opts: ImportRemoteTasksOptions): { created: nu
     };
 
     const importOne = (issue: ExternalTask): void => {
-        if (opts.findExisting(issue)) {
-            skipped++;
+        const existing = opts.findExisting(issue);
+        if (existing) {
+            if (opts.reconcileExisting) {
+                const mapped = opts.plugin.provider.mapToLocal(issue);
+                if (opts.reconcileExisting(existing, issue, mapped, dryRun)) updated++;
+                else skipped++;
+            } else {
+                skipped++;
+            }
+            return;
+        }
+        // Would-create: short-circuit BEFORE resolveProjectId so dryRun never writes a project row.
+        if (dryRun) {
+            opts.onWouldCreate?.(issue);
+            created++;
             return;
         }
         const projectId = resolveProjectId(issue);
@@ -68,5 +93,5 @@ export function importRemoteTasks(opts: ImportRemoteTasksOptions): { created: nu
         }
     }
 
-    return { created, skipped };
+    return { created, updated, skipped };
 }

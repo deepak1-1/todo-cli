@@ -55,7 +55,7 @@ describe('importRemoteTasks', () => {
             buildInput: (i, m) => ({ title: m.title || i.title, githubRef: i.externalRef }),
         });
 
-        expect(result).toEqual({ created: 2, skipped: 0 });
+        expect(result).toEqual({ created: 2, updated: 0, skipped: 0 });
         expect(taskRepo.findByGithubRef('r#1')).not.toBeNull();
         expect(taskRepo.findByGithubRef('r#2')).not.toBeNull();
     });
@@ -73,7 +73,7 @@ describe('importRemoteTasks', () => {
             buildInput: (i) => ({ title: i.title, githubRef: i.externalRef }),
         });
 
-        expect(result).toEqual({ created: 1, skipped: 1 });
+        expect(result).toEqual({ created: 1, updated: 0, skipped: 1 });
     });
 
     it('resolves and caches the project, creating it once per unique name', () => {
@@ -152,9 +152,65 @@ describe('importRemoteTasks', () => {
             onError: (i, err) => errors.push(`${i.externalRef}: ${(err as Error).message}`),
         });
 
-        expect(result).toEqual({ created: 1, skipped: 0 });
+        expect(result).toEqual({ created: 1, updated: 0, skipped: 0 });
         expect(errors).toEqual(['r#1: boom']);
         expect(taskRepo.findByGithubRef('r#2')).not.toBeNull();
+    });
+
+    it('dry-run counts would-creates without writing tasks or projects', () => {
+        const projectsBefore = projectRepo.list().length;
+        const result = importRemoteTasks({
+            issues: [makeIssue({ externalRef: 'r#1', project: 'BrandNewProj' })],
+            plugin: makePlugin((i) => ({ title: i.title })),
+            taskRepo,
+            projectRepo,
+            dryRun: true,
+            findExisting: (i) => taskRepo.findByGithubRef(i.externalRef),
+            projectName: (i) => i.project,
+            projectDescription: () => 'desc',
+            buildInput: (i) => ({ title: i.title, githubRef: i.externalRef }),
+        });
+
+        expect(result).toEqual({ created: 1, updated: 0, skipped: 0 });
+        // No task and — critically — no project row written during dry-run.
+        expect(taskRepo.findByGithubRef('r#1')).toBeNull();
+        expect(projectRepo.list().filter((p) => p.name === 'BrandNewProj')).toHaveLength(0);
+        expect(projectRepo.list().length).toBe(projectsBefore);
+    });
+
+    it('reconcileExisting counts updated vs skipped and runs only for existing tasks', () => {
+        taskRepo.create({ title: 'pre-existing', githubRef: 'r#1' });
+        const seen: string[] = [];
+        const result = importRemoteTasks({
+            issues: [makeIssue({ externalRef: 'r#1' }), makeIssue({ externalRef: 'r#2' })],
+            plugin: makePlugin((i) => ({ title: i.title })),
+            taskRepo,
+            projectRepo,
+            findExisting: (i) => taskRepo.findByGithubRef(i.externalRef),
+            buildInput: (i) => ({ title: i.title, githubRef: i.externalRef }),
+            reconcileExisting: (existing) => {
+                seen.push(existing.githubRef!);
+                return true; // pretend a write happened
+            },
+        });
+
+        // r#1 existed → reconciled (updated); r#2 new → created.
+        expect(result).toEqual({ created: 1, updated: 1, skipped: 0 });
+        expect(seen).toEqual(['r#1']);
+    });
+
+    it('reconcileExisting returning false counts as skipped', () => {
+        taskRepo.create({ title: 'pre-existing', githubRef: 'r#1' });
+        const result = importRemoteTasks({
+            issues: [makeIssue({ externalRef: 'r#1' })],
+            plugin: makePlugin((i) => ({ title: i.title })),
+            taskRepo,
+            projectRepo,
+            findExisting: (i) => taskRepo.findByGithubRef(i.externalRef),
+            buildInput: (i) => ({ title: i.title, githubRef: i.externalRef }),
+            reconcileExisting: () => false,
+        });
+        expect(result).toEqual({ created: 0, updated: 0, skipped: 1 });
     });
 
     it('propagates errors when no onError handler is given', () => {

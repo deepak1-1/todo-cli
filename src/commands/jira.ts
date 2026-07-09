@@ -13,6 +13,7 @@ import { fail, EXIT } from '../utils/exit.js';
 import { emitJson } from '../utils/json-output.js';
 import { runIntegrationCommand } from './_integration-runner.js';
 import { importRemoteTasks } from '../integrations/shared/import-tasks.js';
+import { findByKeyOrVerb, validStatusKeys, isComplete, reconcilePulledStatus, getTransitionTimestamps } from '../core/status.js';
 
 export const jiraCommand = new Command('jira')
     .description('Jira Cloud integration');
@@ -43,6 +44,8 @@ jiraCommand
     .option('--status <status>', 'Filter by Jira status name')
     .option('--assignee <user>', 'Filter by assignee (default: currentUser)')
     .option('--max <count>', 'Maximum results', '50')
+    .option('--sync-status', 'Reconcile status of already-imported tasks (reopen ones mistakenly marked done)')
+    .option('--dry-run', 'Show what would be imported/updated without writing')
     .option('--json', 'Output as JSON')
     .addHelpText('after', `
 Examples:
@@ -64,19 +67,26 @@ Examples:
 
             if (issues.length === 0) {
                 if (opts.json) {
-                    emitJson({ ok: true, command: 'jira pull', data: { pulled: 0, created: 0, skipped: 0 } });
+                    emitJson({ ok: true, command: 'jira pull', data: { pulled: 0, created: 0, updated: 0, skipped: 0 } });
                 } else {
                     console.log(t.muted.chalk('  No issues found matching filters.'));
                 }
                 return;
             }
 
-            const { created, skipped } = importRemoteTasks({
+            const syncStatus = !!opts.syncStatus;
+            const dryRun = !!opts.dryRun;
+            const defs = ctx.statusRepo.list();
+            const reopenTarget = defs.find(d => d.verb === 'reopen')?.key ?? 'todo';
+            const jiraKeyOf = (issue: typeof issues[number]) => (issue.metadata?.jiraKey as string) || issue.externalRef;
+
+            const { created, updated, skipped } = importRemoteTasks({
                 issues,
                 plugin,
                 taskRepo: ctx.taskRepo,
                 projectRepo: ctx.projectRepo,
-                findExisting: (issue) => ctx.taskRepo.findByJiraKey((issue.metadata?.jiraKey as string) || issue.externalRef),
+                dryRun,
+                findExisting: (issue) => ctx.taskRepo.findByJiraKey(jiraKeyOf(issue)),
                 projectName: (issue) => issue.project,
                 projectDescription: (issue) => `Jira project ${issue.project}`,
                 buildInput: (issue, mapped, projectId) => ({
@@ -84,21 +94,71 @@ Examples:
                     description: mapped.description || issue.description || '',
                     priority: mapped.priority || 'medium',
                     status: mapped.status || 'todo',
-                    jiraKey: (issue.metadata?.jiraKey as string) || issue.externalRef,
+                    jiraKey: jiraKeyOf(issue),
                     syncHash: (issue.metadata?.syncHash as string) || '',
                     lastSyncedAt: new Date().toISOString(),
                     projectId: projectId ?? undefined,
                     dueDate: mapped.dueDate,
                     jiraId: ((issue.metadata?.jiraId as string) || issue.externalId) || undefined,
                 }),
+                onWouldCreate: opts.json ? undefined : (issue) => {
+                    console.log(`  ${t.success.chalk('+')} ${jiraKeyOf(issue)} — ${issue.title}`);
+                },
+                reconcileExisting: syncStatus
+                    ? (existing, issue, mapped, dry) => {
+                        const remote = { activeTarget: mapped.status, isTerminal: isComplete(defs, mapped.status ?? 'todo') };
+                        const target = reconcilePulledStatus(defs, existing.status, remote, reopenTarget);
+                        if (!target || target === existing.status) return false;
+                        if (dry) {
+                            if (!opts.json) {
+                                console.log(`  ${t.warning.chalk('~')} ${jiraKeyOf(issue)} ${existing.status} → ${target}`);
+                            }
+                            return true;
+                        }
+                        ctx.taskRepo.update(existing.id, { status: target, ...getTransitionTimestamps(defs, target) });
+                        ctx.actionLog.log({
+                            taskId: existing.id,
+                            action: `status_${target}`,
+                            entityType: 'task',
+                            prevState: JSON.stringify({ status: existing.status }),
+                            newState: JSON.stringify({ status: target }),
+                        });
+                        return true;
+                    }
+                    : undefined,
                 onError: (issue, err) => {
-                    const jiraKey = (issue.metadata?.jiraKey as string) || issue.externalRef;
-                    logger.log(t.warning.chalk(`  Warning: failed to sync ${jiraKey}: ${err instanceof Error ? err.message : String(err)}`));
+                    logger.log(t.warning.chalk(`  Warning: failed to sync ${jiraKeyOf(issue)}: ${err instanceof Error ? err.message : String(err)}`));
                 },
             });
 
+            // Discoverability: when not syncing, tell the user how many stale tasks could be reconciled.
+            if (!syncStatus && !opts.json) {
+                let reconcilable = 0;
+                for (const issue of issues) {
+                    const existing = ctx.taskRepo.findByJiraKey(jiraKeyOf(issue));
+                    if (!existing) continue;
+                    const mapped = plugin.provider.mapToLocal(issue);
+                    const remote = { activeTarget: mapped.status, isTerminal: isComplete(defs, mapped.status ?? 'todo') };
+                    if (reconcilePulledStatus(defs, existing.status, remote, reopenTarget)) reconcilable++;
+                }
+                if (reconcilable > 0) {
+                    console.log(t.warning.chalk(
+                        `${reconcilable} of these are active on Jira but completed locally — run with --sync-status to reconcile.`,
+                    ));
+                }
+            }
+
             if (opts.json) {
-                emitJson({ ok: true, command: 'jira pull', data: { pulled: issues.length, created, skipped } });
+                if (dryRun) {
+                    emitJson({ ok: true, command: 'jira pull', data: { dryRun: true, wouldCreate: created, wouldUpdate: updated, wouldSkip: skipped } });
+                } else {
+                    emitJson({ ok: true, command: 'jira pull', data: { pulled: issues.length, created, updated, skipped } });
+                }
+                return;
+            }
+
+            if (dryRun) {
+                console.log(t.muted.chalk(`\nDry run: ${created} would be imported, ${updated} would be updated, ${skipped} unchanged`));
                 return;
             }
 
@@ -110,7 +170,7 @@ Examples:
 
             for (const issue of issues) {
                 table.push([
-                    t.heading.chalk((issue.metadata?.jiraKey as string) || issue.externalRef),
+                    t.heading.chalk(jiraKeyOf(issue)),
                     issue.title.length > 42 ? issue.title.substring(0, 39) + '...' : issue.title,
                     issue.status,
                     issue.priority || '-',
@@ -118,7 +178,7 @@ Examples:
             }
 
             console.log(table.toString());
-            console.log(success(`Synced ${issues.length} issues (${created} new, ${skipped} already exist locally)`));
+            console.log(success(`Synced ${issues.length} issues (${created} new, ${updated} updated, ${skipped} already exist locally)`));
         })();
     });
 
@@ -156,8 +216,16 @@ Examples:
             // Fetch defs once for status rendering and filtering
             const statusDefs = ctx.statusRepo.list();
             const defaultStatuses = statusDefs.filter(d => !d.archives).map(d => d.key);
+            let resolvedStatus: string | string[] = defaultStatuses;
+            if (opts.status) {
+                const def = findByKeyOrVerb(statusDefs, opts.status);
+                if (!def) {
+                    return fail(EXIT.USAGE, `Invalid status "${opts.status}". Valid statuses: ${validStatusKeys(statusDefs)}`, { json: opts.json as boolean, command: 'jira list' });
+                }
+                resolvedStatus = def.key;
+            }
             const allTasks = ctx.taskRepo.list({
-                status: opts.status ? opts.status : defaultStatuses,
+                status: resolvedStatus,
                 priority: opts.priority || undefined,
             });
 

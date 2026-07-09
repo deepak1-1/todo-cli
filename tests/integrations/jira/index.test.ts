@@ -1,6 +1,17 @@
 // Tests for the Jira IntegrationProvider contract — all network I/O mocked via vi.mock
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import type Database from 'better-sqlite3';
+import { createTestDb } from '../../../src/storage/database.js';
+import { runMigrations } from '../../../src/storage/migrations/runner.js';
+import { TaskRepository } from '../../../src/storage/repositories/task.repo.js';
+import { ProjectRepository } from '../../../src/storage/repositories/project.repo.js';
+import { TagRepository } from '../../../src/storage/repositories/tag.repo.js';
+import { ActionLogRepository } from '../../../src/storage/repositories/action-log.repo.js';
+import { DependencyRepository } from '../../../src/storage/repositories/dependency.repo.js';
+import { TrackingRepository } from '../../../src/storage/repositories/tracking.repo.js';
+import { StatusRepository } from '../../../src/storage/repositories/status.repo.js';
+import type { AppContext } from '../../../src/commands/context.js';
 
 // Mock JiraClient before importing the provider so it never hits a real network
 vi.mock('../../../src/integrations/jira/jira-client.js', () => ({
@@ -363,6 +374,87 @@ describe('jiraProvider.mapToRemote', () => {
         expect(remote.description).toBe('Details');
         expect(remote.duedate).toBe('2026-10-01');
         expect(remote.priority).toBe('Medium');
+    });
+});
+
+// ─── jira list -S status resolution ───────────────────────────────────────────
+// Tests for `findByKeyOrVerb` guard in the jira list action handler.
+// Each test builds a fresh in-memory DB, mocks getContext(), then drives the
+// command via parseAsync — matching the bulk / status-management test pattern.
+describe('jira list -S status resolution', () => {
+    let jiraDb: Database.Database;
+    let jiraCtx: AppContext;
+
+    function buildJiraCtx(database: Database.Database): AppContext {
+        return {
+            taskRepo: new TaskRepository(database),
+            projectRepo: new ProjectRepository(database),
+            tagRepo: new TagRepository(database),
+            actionLog: new ActionLogRepository(database),
+            depRepo: new DependencyRepository(database),
+            trackingRepo: new TrackingRepository(database),
+            statusRepo: new StatusRepository(database),
+        };
+    }
+
+    beforeEach(() => {
+        vi.resetModules();
+        jiraDb = createTestDb();
+        runMigrations(jiraDb);
+        jiraCtx = buildJiraCtx(jiraDb);
+        vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        process.exitCode = 0;
+    });
+
+    afterEach(() => {
+        jiraDb.close();
+        vi.restoreAllMocks();
+        process.exitCode = 0;
+    });
+
+    it('-S in-progress resolves to in_progress and does not set USAGE exit code', async () => {
+        vi.doMock('../../../src/commands/context.js', () => ({ getContext: () => jiraCtx }));
+        const { jiraCommand } = await import('../../../src/commands/jira.js');
+        // Seed a jira-linked in_progress task so the command has something to process
+        const task = jiraCtx.taskRepo.create({ title: 'Jira task', status: 'in_progress', jiraKey: 'PROJ-1' });
+        jiraCtx.taskRepo.update(task.id, { status: 'in_progress' });
+        await jiraCommand.parseAsync(['list', '-S', 'in-progress'], { from: 'user' });
+        expect(process.exitCode).not.toBe(2);
+    });
+
+    it('-S in_progress (canonical) resolves without USAGE error', async () => {
+        vi.doMock('../../../src/commands/context.js', () => ({ getContext: () => jiraCtx }));
+        const { jiraCommand } = await import('../../../src/commands/jira.js');
+        await jiraCommand.parseAsync(['list', '-S', 'in_progress'], { from: 'user' });
+        expect(process.exitCode).not.toBe(2);
+    });
+
+    it('-S bogus sets EXIT.USAGE (2) and does not silently return tasks', async () => {
+        vi.doMock('../../../src/commands/context.js', () => ({ getContext: () => jiraCtx }));
+        const { jiraCommand } = await import('../../../src/commands/jira.js');
+        await jiraCommand.parseAsync(['list', '-S', 'bogus'], { from: 'user' });
+        // fail(EXIT.USAGE) sets process.exitCode = 2
+        expect(process.exitCode).toBe(2);
+    });
+
+    it('-S bogus with --json emits structured ok:false error with command:"jira list"', async () => {
+        vi.doMock('../../../src/commands/context.js', () => ({ getContext: () => jiraCtx }));
+        const { jiraCommand } = await import('../../../src/commands/jira.js');
+        let captured = '';
+        const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+            captured += chunk;
+            return true;
+        });
+        await jiraCommand.parseAsync(['list', '-S', 'bogus', '--json'], { from: 'user' });
+        writeSpy.mockRestore();
+        const parsed = JSON.parse(captured.trim()) as Record<string, unknown>;
+        expect(parsed.ok).toBe(false);
+        expect(parsed.command).toBe('jira list');
+        const errorObj = parsed.error as Record<string, unknown>;
+        expect(errorObj.code).toBe(2);
+        expect(String(errorObj.message)).toMatch(/bogus/);
     });
 });
 
