@@ -100,6 +100,8 @@ todo mcp --print-config
 2. Paste the printed JSON into your MCP client's config file. The `--print-config` output already contains the correct absolute path to your installed binary — no editing required.
 
 3. Restart your AI agent. It will now have access to the following tools:
+
+   **Task management:**
    - `todo_add_task` — create a task
    - `todo_update_task` — edit title, priority, due date, tags, project
    - `todo_set_status` — change task status
@@ -107,9 +109,19 @@ todo mcp --print-config
    - `todo_list_tasks` — list with filters
    - `todo_get_task` — get a single task with full relations
 
+   **Time tracking:**
+   - `todo_start_timer` — start a timer on a task (auto-advances status to in_progress)
+   - `todo_stop_timer` — stop a timer by task ID, or all active timers
+   - `todo_get_active_timers` — list all running timers with elapsed seconds and notes
+   - `todo_log_time` — manually log time (e.g. "2h", "30m", "1h30m", "90" minutes)
+   - `todo_list_sessions` — list all tracking sessions for a task
+   - `todo_get_time_report` — time report grouped by task for the last N days
+   - `todo_reduce_session` — subtract time from a completed session (cannot be undone)
+   - `todo_delete_session` — permanently remove a session (requires `--allow-delete`)
+
 ### Safety
 
-By default `todo_delete_task` **archives** tasks (recoverable with `todo undo`). Permanent hard-delete requires starting the server with `--allow-delete`:
+By default `todo_delete_task` **archives** tasks (recoverable with `todo undo`), and `todo_delete_session` is **disabled**. Permanent hard-delete and session deletion both require starting the server with `--allow-delete`:
 
 ```bash
 todo mcp --allow-delete
