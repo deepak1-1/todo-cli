@@ -4,12 +4,12 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import { getRegistry } from './plugin-registry.js';
 import { IntegrationProvider, PluginManifest } from './types.js';
 import * as logger from '../utils/logger.js';
+import { getDataDir } from '../utils/data-dir.js';
 
-const PLUGINS_DIR = path.join(os.homedir(), '.todo-cli', 'plugins');
+const PLUGINS_DIR = path.join(getDataDir(), 'plugins');
 
 async function validatePlugin(provider: IntegrationProvider): Promise<boolean> {
     try {

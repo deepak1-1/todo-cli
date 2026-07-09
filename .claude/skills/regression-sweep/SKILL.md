@@ -30,18 +30,21 @@ List every CLI command and TUI screen that touches the changed module(s). For ea
 - Still correct?  → why (mention the test/line that proves it)
 - Possibly broken? → run it locally and observe
 
+**Live-DB safety: NEVER smoke against the real `~/.todo-cli` — even reads apply pending migrations. Always isolate via `TODO_CLI_HOME` (see CLAUDE.md "Live database safety").**
+
 Cheap checklist to actually run:
 ```bash
+export TODO_CLI_HOME=$(mktemp -d)              # throwaway data dir — MANDATORY before any CLI smoke
 npm run typecheck
 npm test
 node dist/index.js --help                      # commander tree intact
 node dist/index.js list                        # core read path
-node dist/index.js add "regression sweep test" # write path
+node dist/index.js add "regression sweep test" # write path (lands in the throwaway DB)
 node dist/index.js show <id>
 node dist/index.js done <id>
 node dist/index.js                              # chat boots (Ctrl+C immediately)
 ```
-Add specific smoke commands for whatever you changed.
+Add specific smoke commands for whatever you changed — all in the same `TODO_CLI_HOME` shell.
 
 ## Step 3 — New-bug audit
 Look at the diff with fresh eyes and ask:

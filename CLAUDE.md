@@ -118,6 +118,15 @@ Ten project-local skills, each as `<name>/SKILL.md`. Picked up automatically by 
 | `tester` | `vitest-testing`, `better-sqlite3`, `sqlite-migrations`, `regression-sweep` |
 | `code-reviewer` | All ten — independently re-runs `regression-sweep` |
 
+## Live database safety (non-negotiable)
+
+The real user database lives in `~/.todo-cli/` (`todo.db`, `credentials.json`, `.salt`, `plugins/`). It contains live production data.
+
+- **NEVER run the CLI against the real `~/.todo-cli` for testing, smoke tests, or verification.** No creating tasks, no deleting, no status changes — and no read commands either: merely opening the DB via `getContext()` auto-applies any pending migrations to live data.
+- **All CLI smoke tests MUST set `TODO_CLI_HOME` to a throwaway directory**, e.g. `export TODO_CLI_HOME=$(mktemp -d)` (or the session scratchpad). `src/utils/data-dir.ts` resolves the data dir from this env var; DB, credentials, plugins, and app config (`conf` store) all follow it.
+- **Unit tests MUST use `createTestDb()`** from `src/storage/database.ts` (in-memory) — never the singleton `getDb()`.
+- This rule binds **every agent** (dev, tester, code-reviewer, arch, pm) and every ad-hoc shell command. Running `todo list` "just to check" against the live DB is a protocol violation.
+
 ## Verification protocol (non-negotiable)
 
 Every code change runs the **`regression-sweep`** skill before being declared done. Three independent passes:
@@ -129,7 +138,7 @@ Every code change runs the **`regression-sweep`** skill before being declared do
 Each pass covers four checks:
 
 - **Similar-issue search** — grep the codebase for the same *shape* of bug/anti-pattern (not the literal text). Fix all twins in the same commit or ticket them explicitly.
-- **No-broken-flow** — `npm run typecheck && npm run lint && npm test && npm run build`, then smoke at least `todo --help`, `todo list`, and one command touching the changed module. For every CLI / MCP path that touches the changed module, state explicitly whether it still works.
+- **No-broken-flow** — `npm run typecheck && npm run lint && npm test && npm run build`, then smoke at least `todo --help`, `todo list`, and one command touching the changed module — always under `TODO_CLI_HOME` isolation (see Live database safety). For every CLI / MCP path that touches the changed module, state explicitly whether it still works.
 - **No-new-bug audit** — grep the diff for: new `any`, new `console.log`, new SQL interpolation, new empty catches, new top-level `ink`/`node-llama-cpp` imports (both removed — any reintroduction is a regression), new `process.exit` outside `src/index.ts`, new dep missing from `tsup.config.ts` `external`/`noExternal`, new migration not registered in `runner.ts`, new command not registered in `src/index.ts`.
 - **No-dead-code** — anything orphaned by the change is removed in the same commit (unused functions, dangling imports, removed-column references, commented-out blocks, drive-by `// TODO` without ticket, `_unused` renames).
 - **Double-verify trace** — walk one happy path and one error path top-to-bottom through every layer (CLI/intent → handler → core → repo → SQL → output).

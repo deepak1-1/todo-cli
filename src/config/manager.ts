@@ -4,14 +4,18 @@
 
 import Conf from 'conf';
 import { DEFAULT_CONFIG, CONFIG_KEYS, type AppConfig } from './defaults.js';
+import { getDataDirOverride } from '../utils/data-dir.js';
 
 let store: Conf<AppConfig> | null = null;
 
 function getStore(): Conf<AppConfig> {
     if (!store) {
+        // cwd override keeps config out of the OS config dir under TODO_CLI_HOME isolation
+        const cwd = getDataDirOverride();
         store = new Conf<AppConfig>({
             projectName: 'todo-cli',
             defaults: DEFAULT_CONFIG,
+            ...(cwd ? { cwd } : {}),
         });
     }
     return store;

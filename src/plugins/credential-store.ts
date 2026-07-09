@@ -6,6 +6,7 @@ import * as os from 'node:os';
 import * as crypto from 'node:crypto';
 import { CredentialStore } from './types.js';
 import { debug, logWarn } from '../utils/logger.js';
+import { getDataDir } from '../utils/data-dir.js';
 
 // Thrown when the credentials file exists but cannot be parsed as valid JSON
 export class CredentialFileCorruptError extends Error {
@@ -16,7 +17,7 @@ export class CredentialFileCorruptError extends Error {
 }
 
 // Default paths; overridden per-instance via constructor for test isolation
-const DEFAULT_CREDENTIALS_DIR = path.join(os.homedir(), '.todo-cli');
+const DEFAULT_CREDENTIALS_DIR = getDataDir();
 const DEFAULT_CREDENTIALS_FILE = path.join(DEFAULT_CREDENTIALS_DIR, 'credentials.json');
 const DEFAULT_SALT_FILE = path.join(DEFAULT_CREDENTIALS_DIR, '.salt');
 
