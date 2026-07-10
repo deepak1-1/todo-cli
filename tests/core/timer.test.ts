@@ -38,8 +38,11 @@ describe('formatDuration', () => {
     });
 
     it('should omit seconds when they are zero with includeSeconds', () => {
-        expect(formatDuration(3600, true)).toBe('1h 0m');
+        expect(formatDuration(60, true)).toBe('1m');
+        expect(formatDuration(120, true)).toBe('2m');
         expect(formatDuration(300, true)).toBe('5m');
+        expect(formatDuration(3600, true)).toBe('1h 0m');
+        expect(formatDuration(7200, true)).toBe('2h 0m');
     });
 
     it('should show hours and minutes without seconds when includeSeconds is false', () => {
@@ -86,14 +89,5 @@ describe('parseDuration', () => {
 
     it('returns 0 for "0m"', () => {
         expect(parseDuration('0m')).toBe(0);
-    });
-
-    it('should handle exact minute boundary with includeSeconds', () => {
-        expect(formatDuration(60, true)).toBe('1m');
-        expect(formatDuration(120, true)).toBe('2m');
-    });
-
-    it('should handle exact hour boundary with includeSeconds', () => {
-        expect(formatDuration(7200, true)).toBe('2h 0m');
     });
 });
