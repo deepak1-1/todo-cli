@@ -228,3 +228,153 @@ describe('importRemoteTasks', () => {
         ).toThrow('boom');
     });
 });
+
+// ──────────────────────────────────────────────
+// Marker upsert — project description backfill
+// ──────────────────────────────────────────────
+describe('importRemoteTasks — marker upsert', () => {
+    it('writes the description marker when creating a new project', () => {
+        importRemoteTasks({
+            issues: [makeIssue({ externalRef: 'r#1', project: 'NewProj' })],
+            plugin: makePlugin((i) => ({ title: i.title })),
+            taskRepo,
+            projectRepo,
+            findExisting: (i) => taskRepo.findByGithubRef(i.externalRef),
+            projectName: (i) => i.project,
+            projectDescription: () => 'GitHub: acme/frontend',
+            buildInput: (i, m, projectId) => ({ title: m.title || i.title, projectId: projectId ?? null, githubRef: i.externalRef }),
+        });
+
+        const proj = projectRepo.getByName('NewProj');
+        expect(proj?.description).toBe('GitHub: acme/frontend');
+    });
+
+    it('upserts the marker on a pre-existing project with empty description', () => {
+        projectRepo.create({ name: 'ExistingProj', description: '' });
+
+        importRemoteTasks({
+            issues: [makeIssue({ externalRef: 'r#1', project: 'ExistingProj' })],
+            plugin: makePlugin((i) => ({ title: i.title })),
+            taskRepo,
+            projectRepo,
+            findExisting: (i) => taskRepo.findByGithubRef(i.externalRef),
+            projectName: (i) => i.project,
+            projectDescription: () => 'GitHub: acme/frontend',
+            buildInput: (i, m, projectId) => ({ title: m.title || i.title, projectId: projectId ?? null, githubRef: i.externalRef }),
+        });
+
+        const proj = projectRepo.getByName('ExistingProj');
+        expect(proj?.description).toBe('GitHub: acme/frontend');
+    });
+
+    it('does NOT overwrite a pre-existing non-empty user description', () => {
+        projectRepo.create({ name: 'OldProj', description: 'Some custom description' });
+
+        importRemoteTasks({
+            issues: [makeIssue({ externalRef: 'r#1', project: 'OldProj' })],
+            plugin: makePlugin((i) => ({ title: i.title })),
+            taskRepo,
+            projectRepo,
+            findExisting: (i) => taskRepo.findByGithubRef(i.externalRef),
+            projectName: (i) => i.project,
+            projectDescription: () => 'GitHub: acme/frontend',
+            buildInput: (i, m, projectId) => ({ title: m.title || i.title, projectId: projectId ?? null, githubRef: i.externalRef }),
+        });
+
+        const proj = projectRepo.getByName('OldProj');
+        // Non-empty user description is never overwritten — marker upsert only fills blanks.
+        expect(proj?.description).toBe('Some custom description');
+    });
+
+    it('does NOT overwrite an existing integration marker description (even if caller differs)', () => {
+        projectRepo.create({ name: 'MarkedProj', description: 'GitHub: acme/frontend' });
+
+        importRemoteTasks({
+            issues: [makeIssue({ externalRef: 'r#1', project: 'MarkedProj' })],
+            plugin: makePlugin((i) => ({ title: i.title })),
+            taskRepo,
+            projectRepo,
+            findExisting: (i) => taskRepo.findByGithubRef(i.externalRef),
+            projectName: (i) => i.project,
+            projectDescription: () => 'GitHub: acme/other',
+            buildInput: (i, m, projectId) => ({ title: m.title || i.title, projectId: projectId ?? null, githubRef: i.externalRef }),
+        });
+
+        const proj = projectRepo.getByName('MarkedProj');
+        // Any non-empty description is preserved — marker upsert only fills blanks.
+        expect(proj?.description).toBe('GitHub: acme/frontend');
+    });
+
+    it('does not overwrite when description exactly matches the marker', () => {
+        projectRepo.create({ name: 'SameMarker', description: 'GitHub: acme/frontend' });
+
+        importRemoteTasks({
+            issues: [makeIssue({ externalRef: 'r#1', project: 'SameMarker' })],
+            plugin: makePlugin((i) => ({ title: i.title })),
+            taskRepo,
+            projectRepo,
+            findExisting: (i) => taskRepo.findByGithubRef(i.externalRef),
+            projectName: (i) => i.project,
+            projectDescription: () => 'GitHub: acme/frontend',
+            buildInput: (i, m, projectId) => ({ title: m.title || i.title, projectId: projectId ?? null, githubRef: i.externalRef }),
+        });
+
+        const proj = projectRepo.getByName('SameMarker');
+        expect(proj?.description).toBe('GitHub: acme/frontend');
+    });
+
+    it('does not upsert when no projectDescription callback is provided (Jira/other path)', () => {
+        projectRepo.create({ name: 'JiraProj', description: '' });
+
+        importRemoteTasks({
+            issues: [makeIssue({ externalRef: 'r#1', project: 'JiraProj' })],
+            plugin: makePlugin((i) => ({ title: i.title })),
+            taskRepo,
+            projectRepo,
+            findExisting: (i) => taskRepo.findByGithubRef(i.externalRef),
+            projectName: (i) => i.project,
+            // No projectDescription provided
+            buildInput: (i, m, projectId) => ({ title: m.title || i.title, projectId: projectId ?? null, githubRef: i.externalRef }),
+        });
+
+        const proj = projectRepo.getByName('JiraProj');
+        expect(proj?.description).toBe('');
+    });
+
+    it('Jira: backfills description marker onto pre-existing project with empty description', () => {
+        projectRepo.create({ name: 'MyJiraProject', description: '' });
+
+        importRemoteTasks({
+            issues: [makeIssue({ externalRef: 'r#1', project: 'MyJiraProject' })],
+            plugin: makePlugin((i) => ({ title: i.title })),
+            taskRepo,
+            projectRepo,
+            findExisting: (i) => taskRepo.findByGithubRef(i.externalRef),
+            projectName: (i) => i.project,
+            projectDescription: () => 'Jira: MY-PROJECT',
+            buildInput: (i, m, projectId) => ({ title: m.title || i.title, projectId: projectId ?? null, githubRef: i.externalRef }),
+        });
+
+        const proj = projectRepo.getByName('MyJiraProject');
+        expect(proj?.description).toBe('Jira: MY-PROJECT');
+    });
+
+    it('does not upsert description during dry-run (project row is never written)', () => {
+        // dry-run short-circuits before resolveProjectId, so no project is created and no marker upsert fires
+        const result = importRemoteTasks({
+            issues: [makeIssue({ externalRef: 'r#1', project: 'DryProj' })],
+            plugin: makePlugin((i) => ({ title: i.title })),
+            taskRepo,
+            projectRepo,
+            dryRun: true,
+            findExisting: (i) => taskRepo.findByGithubRef(i.externalRef),
+            projectName: (i) => i.project,
+            projectDescription: () => 'GitHub: acme/frontend',
+            buildInput: (i, m, projectId) => ({ title: m.title || i.title, projectId: projectId ?? null, githubRef: i.externalRef }),
+        });
+
+        expect(result.created).toBe(1);
+        // No project row should exist — dry-run never reached resolveProjectId
+        expect(projectRepo.getByName('DryProj')).toBeNull();
+    });
+});

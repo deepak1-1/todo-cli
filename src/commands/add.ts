@@ -105,6 +105,21 @@ Examples:
             }
         }
 
+        // Validate dependency IDs before creating the task, so a bad ID never leaves partial state
+        let depIds: number[] = [];
+        if (opts.depends) {
+            try {
+                depIds = parseIdList(opts.depends);
+            } catch (e) {
+                return fail(EXIT.USAGE, e instanceof Error ? e.message : String(e), { json: jsonMode, command: 'add' });
+            }
+            for (const depId of depIds) {
+                if (!ctx.taskRepo.getById(depId)) {
+                    return fail(EXIT.NOT_FOUND, `Task #${depId} not found`, { json: jsonMode, command: 'add' });
+                }
+            }
+        }
+
         const { task } = applyAdd(ctx, {
             title,
             description: opts.description,
@@ -116,12 +131,9 @@ Examples:
             parentId,
         });
 
-        // Set dependencies (CLI-only; not exposed via MCP tools)
-        if (opts.depends) {
-            const depIds = parseIdList(opts.depends);
-            for (const depId of depIds) {
-                ctx.depRepo.add(task.id, depId);
-            }
+        // Set dependencies (CLI-only; not exposed via MCP tools); IDs already validated above
+        for (const depId of depIds) {
+            ctx.depRepo.add(task.id, depId);
         }
 
         // Output

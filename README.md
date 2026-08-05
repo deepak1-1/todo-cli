@@ -157,7 +157,7 @@ Configure todo-cli via `~/.todo-cli/config.json`:
 ```bash
 todo integrate          # list available integrations and their status
 todo jira setup         # configure Jira credentials
-todo gh setup           # configure GitHub credentials
+todo gh auth            # check GitHub CLI authentication status
 ```
 
 Once configured, run `todo jira sync` or `todo gh sync` to pull issues into your task list.
@@ -167,7 +167,50 @@ Once configured, run `todo jira sync` or `todo gh sync` to pull issues into your
 | Service | Features | Status |
 |---------|----------|--------|
 | Jira | Create/sync tasks, track issues | Stable |
-| GitHub | Create tasks from issues/PRs | Stable |
+| GitHub | Create tasks from issues/PRs, push tasks as issues | Stable |
+
+### GitHub Integration
+
+#### Pulling issues
+
+Import assigned GitHub issues as local tasks:
+
+```bash
+todo gh pull                          # pull all assigned issues (all repos)
+todo gh pull --repo acme/frontend     # filter by repository
+todo gh pull -P myproject             # scope to a local project (derives repo from linked tasks)
+todo gh pull --sync-status            # also reconcile status of already-imported tasks
+todo gh pull --dry-run                # preview without writing
+```
+
+Note: `gh pull` creates new local tasks from remote issues. Already-imported tasks are skipped unless `--sync-status` is passed.
+
+#### Pushing tasks as issues
+
+Push local tasks to GitHub — update linked tasks and optionally create issues for unlinked ones:
+
+```bash
+todo gh push                          # update already-linked tasks only
+todo gh push -P myproject             # create issues + update linked tasks in project "myproject"
+todo gh push -P myproject --repo o/r  # override repo for new issue creation
+todo gh push -P none --repo o/r       # push project-less tasks, creating issues in o/r
+todo gh push -P myproject --dry-run   # preview without writing
+todo gh push --json                   # machine-readable output
+```
+
+**Scope and creation rules:**
+- Without `-P` or `--repo`, only already-linked tasks are updated (no new issues created).
+- `-P <project>` scopes to that project's tasks. The repo is derived from sibling tasks' GitHub refs or the project's `GitHub: owner/repo` description marker; pass `--repo` to override.
+- `-P none` scopes to project-less tasks; `--repo` is required for new issue creation.
+- Done and archived tasks are never pushed as new issues.
+- Subtasks become independent issues (no parent linkage on GitHub).
+
+**Pull creates, push updates + creates:**
+`gh pull` only creates local tasks (never updates them unless `--sync-status` is given). `gh push` both updates linked tasks (state, priority label) and creates new issues for unlinked ones when `-P` or `--repo` is set.
+
+**Exit codes:**
+- `0` — all tasks succeeded.
+- `1` — one or more tasks failed (partial failure); created/updated tasks are still reported.
 
 ## Plugin Development
 

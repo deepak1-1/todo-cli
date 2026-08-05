@@ -1,7 +1,7 @@
 // Shared filter option definitions and task-fetch pipeline for ls and bulk commands
 import { Command } from 'commander';
 import type { TaskFilters, TaskPriority, TaskSort, TaskWithRelations } from '../core/types.js';
-import { fuzzySearch } from '../core/filter.js';
+import { searchAndLimit } from '../core/filter.js';
 import { parseIntOption, parseStrictPositiveInt } from '../utils/format.js';
 import type { AppContext } from './context.js';
 import { resolveStatusOrThrow } from '../core/status.js';
@@ -92,9 +92,10 @@ export function filterAndSearchTasks(
                 ? opts.limit
                 : parseIntOption(opts.limit, 'limit')
             : undefined;
-    let tasks = ctx.taskRepo.list(filters, sort, limit);
-    if (opts.search) {
-        tasks = fuzzySearch(tasks, opts.search);
+    const searching = !!opts.search;
+    let tasks = ctx.taskRepo.list(filters, sort, searching ? undefined : limit);
+    if (searching) {
+        tasks = searchAndLimit(tasks, opts.search!, limit);
     }
     return { tasks, filters, sort };
 }

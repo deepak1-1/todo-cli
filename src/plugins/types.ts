@@ -71,6 +71,8 @@ export interface IntegrationProvider {
     healthCheck(store: CredentialStore): Promise<boolean>;
     pull(store: CredentialStore, filters: PullFilters): Promise<ExternalTask[]>;
     push(store: CredentialStore, task: Task, externalRef: string, statusDefs?: StatusDef[]): Promise<PushResult>;
+    /** Optional: create a new remote item for a local task that has no externalRef yet. */
+    createRemote?(store: CredentialStore, task: Task, target: { project: string }, statusDefs?: StatusDef[]): Promise<PushResult>;
     mapToLocal(external: ExternalTask): Partial<CreateTaskInput> & { status?: TaskStatus };
     mapToRemote(task: Task): Record<string, unknown>;
 

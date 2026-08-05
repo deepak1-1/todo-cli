@@ -83,11 +83,77 @@ describe('parseDuration', () => {
         expect(parseDuration('45s')).toBe(45);
     });
 
-    it('returns 0 for unrecognised input: "abc"', () => {
-        expect(parseDuration('abc')).toBe(0);
+    it('returns NaN for unrecognised input: "abc"', () => {
+        expect(Number.isNaN(parseDuration('abc'))).toBe(true);
     });
 
     it('returns 0 for "0m"', () => {
         expect(parseDuration('0m')).toBe(0);
+    });
+
+    // ---- decimal minutes/seconds regression (bug fix) ----
+
+    it('parses fractional minutes: "1.5m" → 90', () => {
+        expect(parseDuration('1.5m')).toBe(90);
+    });
+
+    it('parses fractional seconds, rounded: "1.5s" → 2', () => {
+        expect(parseDuration('1.5s')).toBe(2);
+    });
+
+    it('parses fractional minutes: "0.5m" → 30', () => {
+        expect(parseDuration('0.5m')).toBe(30);
+    });
+
+    it('parses fractional bare number as minutes: "90.5" → 5430', () => {
+        expect(parseDuration('90.5')).toBe(5430);
+    });
+
+    // ---- explicit rejection of unsupported/malformed input ----
+
+    it('rejects day suffix: "1d" → NaN', () => {
+        expect(Number.isNaN(parseDuration('1d'))).toBe(true);
+    });
+
+    it('rejects week suffix: "1w" → NaN', () => {
+        expect(Number.isNaN(parseDuration('1w'))).toBe(true);
+    });
+
+    it('rejects unknown unit: "5x" → NaN', () => {
+        expect(Number.isNaN(parseDuration('5x'))).toBe(true);
+    });
+
+    it('rejects trailing unit-less number: "1h30" → NaN', () => {
+        expect(Number.isNaN(parseDuration('1h30'))).toBe(true);
+    });
+
+    it('rejects empty string → NaN', () => {
+        expect(Number.isNaN(parseDuration(''))).toBe(true);
+    });
+
+    it('rejects whitespace-only string → NaN', () => {
+        expect(Number.isNaN(parseDuration('   '))).toBe(true);
+    });
+
+    it('rejects negative sign: "-5m" → NaN', () => {
+        expect(Number.isNaN(parseDuration('-5m'))).toBe(true);
+    });
+
+    // ---- whitespace and case tolerance ----
+
+    it('tolerates space between components: "1h 30m" → 5400', () => {
+        expect(parseDuration('1h 30m')).toBe(5400);
+    });
+
+    it('is case-insensitive: "1H30M" → 5400', () => {
+        expect(parseDuration('1H30M')).toBe(5400);
+    });
+
+    it('trims leading/trailing whitespace: " 2h " → 7200', () => {
+        expect(parseDuration(' 2h ')).toBe(7200);
+    });
+
+    it('sums repeated units: "30m30m" → 3600', () => {
+        expect(parseDuration('30m30m')).toBe(3600);
     });
 });

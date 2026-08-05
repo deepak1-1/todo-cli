@@ -13,7 +13,7 @@ import { fail, EXIT } from '../utils/exit.js';
 import { emitJson } from '../utils/json-output.js';
 import { runIntegrationCommand } from './_integration-runner.js';
 import { importRemoteTasks } from '../integrations/shared/import-tasks.js';
-import { findByKeyOrVerb, validStatusKeys, isComplete, reconcilePulledStatus, getTransitionTimestamps } from '../core/status.js';
+import { findByKeyOrVerb, validStatusKeys, isComplete, reconcilePulledStatus, getTransitionTimestamps, reopenTargetKey } from '../core/status.js';
 
 export const jiraCommand = new Command('jira')
     .description('Jira Cloud integration');
@@ -77,7 +77,7 @@ Examples:
             const syncStatus = !!opts.syncStatus;
             const dryRun = !!opts.dryRun;
             const defs = ctx.statusRepo.list();
-            const reopenTarget = defs.find(d => d.verb === 'reopen')?.key ?? 'todo';
+            const reopenTarget = reopenTargetKey(defs);
             const jiraKeyOf = (issue: typeof issues[number]) => (issue.metadata?.jiraKey as string) || issue.externalRef;
 
             const { created, updated, skipped } = importRemoteTasks({

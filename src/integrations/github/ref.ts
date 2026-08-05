@@ -13,6 +13,12 @@ const GITHUB_REF_RE = /^([^/\s]+)\/([^/#\s]+)#(\d+)$/;
 // Anchored regex: full GitHub PR or issue URL.
 const GITHUB_PR_URL_RE = /^https:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/(?:pull|issues)\/(\d+)\/?$/;
 
+// Validates bare owner/repo format (no #N suffix). Used in createRemote and push handler.
+export const REPO_FORMAT_RE = /^[^/\s]+\/[^/#\s]+$/;
+
+// Prefix written to project descriptions by importRemoteTasks and read by repo-resolution.
+export const GITHUB_MARKER_PREFIX = 'GitHub: ';
+
 /**
  * Parse an `owner/repo#number` style GitHub ref.
  * Returns null for any malformed input — never throws.

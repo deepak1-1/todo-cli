@@ -38,10 +38,15 @@ export interface GitHubCommitStatus {
 // gh CLI exits with code 4 for auth/token failures — never retry those.
 const GH_AUTH_EXIT_CODES = new Set([4]);
 
+// Matches a genuine HTTP 5xx/429 status token as gh CLI renders it, e.g. "(HTTP 503)" or "(HTTP/2 503)".
+const GH_HTTP_STATUS_RE = /\(\s*(?:HTTP\S*\s*)?(?:429|5\d{2})\s*\)/i;
+
 /**
  * Retry predicate for gh CLI errors.
  * Auth failures (exit 4) must not be retried — they are permanent until re-auth.
- * Network-level errors and transient 5xx-style messages may be retried.
+ * Network-level errors and transient HTTP 5xx/429 status tokens in stderr may be retried.
+ * Scans err.stderr (not err.message), since err.message embeds the full command line,
+ * which can contain digits like an issue number that falsely look like a 5xx status.
  */
 function shouldRetryGhError(err: unknown): boolean {
     if (err instanceof Error) {
@@ -56,12 +61,15 @@ function shouldRetryGhError(err: unknown): boolean {
         if (typeof stderr === 'string' && /not logged into|authentication required|token invalid/i.test(stderr)) {
             return false;
         }
+        if (typeof stderr === 'string' && stderr.length > 0) {
+            return GH_HTTP_STATUS_RE.test(stderr);
+        }
     }
-    // Fall back to the shared default: retry on network errors and HTTP 5xx/429 hints.
+    // No stderr available (e.g. pure network rejection) — fall back to network-code detection only.
+    // Do NOT scan err.message here: it embeds the full command line and would false-positive
+    // on any 5xx-looking number in the args (issue #503, branch release-500, etc).
     const msg = err instanceof Error ? err.message : String(err);
-    const isNetworkErr = /ECONNRESET|ETIMEDOUT|ENETUNREACH|EAI_AGAIN/.test(msg);
-    const is5xxErr = /\b5\d{2}\b/.test(msg);
-    return isNetworkErr || is5xxErr;
+    return /ECONNRESET|ETIMEDOUT|ENETUNREACH|EAI_AGAIN/.test(msg);
 }
 
 export class GitHubClient {
@@ -71,41 +79,39 @@ export class GitHubClient {
         this.logger = logger;
     }
 
-    /** Run a gh command and return parsed JSON output */
-    private async gh<T>(args: string[]): Promise<T> {
+    /** Run a gh command and return parsed JSON output. Set opts.retry for idempotent reads only. */
+    private async gh<T>(args: string[], opts?: { retry?: boolean }): Promise<T> {
         this.logger.debug(`gh ${args.join(' ')}`);
-        return withRetry(
-            async () => {
-                try {
-                    const { stdout } = await execFileAsync('gh', args, {
-                        timeout: 30_000,
-                        maxBuffer: 10 * 1024 * 1024,
-                    });
-                    return JSON.parse(stdout) as T;
-                } catch (err: unknown) {
-                    const msg = err instanceof Error ? err.message : String(err);
-                    this.logger.error(`gh command failed: ${msg}`);
-                    // Rethrow original so shouldRetryGhError can inspect .status/.stderr.
-                    throw err;
-                }
-            },
-            { shouldRetry: shouldRetryGhError },
-        );
-    }
-
-    /** Run a gh command and return raw stdout */
-    private async ghRaw(args: string[]): Promise<string> {
-        this.logger.debug(`gh ${args.join(' ')}`);
-        return withRetry(
-            async () => {
+        const run = async (): Promise<T> => {
+            try {
                 const { stdout } = await execFileAsync('gh', args, {
                     timeout: 30_000,
                     maxBuffer: 10 * 1024 * 1024,
                 });
-                return stdout.trim();
-            },
-            { shouldRetry: shouldRetryGhError },
-        );
+                return JSON.parse(stdout) as T;
+            } catch (err: unknown) {
+                const msg = err instanceof Error ? err.message : String(err);
+                this.logger.error(`gh command failed: ${msg}`);
+                // Rethrow original so shouldRetryGhError can inspect .status/.stderr.
+                throw err;
+            }
+        };
+        if (!opts?.retry) return run();
+        return withRetry(run, { shouldRetry: shouldRetryGhError });
+    }
+
+    /** Run a gh command and return raw stdout. Set opts.retry for idempotent reads/edits only — never for creates. */
+    private async ghRaw(args: string[], opts?: { retry?: boolean }): Promise<string> {
+        this.logger.debug(`gh ${args.join(' ')}`);
+        const run = async (): Promise<string> => {
+            const { stdout } = await execFileAsync('gh', args, {
+                timeout: 30_000,
+                maxBuffer: 10 * 1024 * 1024,
+            });
+            return stdout.trim();
+        };
+        if (!opts?.retry) return run();
+        return withRetry(run, { shouldRetry: shouldRetryGhError });
     }
 
     /** Check if gh CLI is authenticated (at least one active account) */
@@ -122,7 +128,7 @@ export class GitHubClient {
 
     /** Get the authenticated user */
     async getUser(): Promise<GitHubUser> {
-        return this.gh<GitHubUser>(['api', 'user']);
+        return this.gh<GitHubUser>(['api', 'user'], { retry: true });
     }
 
     /** Fetch issues assigned to the current user */
@@ -153,7 +159,7 @@ export class GitHubClient {
                 milestone?: { title: string } | null;
                 assignees: Array<{ login: string }>;
                 url: string;
-            }>>(args);
+            }>>(args, { retry: true });
 
             return issues.map(issue => {
                 return {
@@ -195,7 +201,7 @@ export class GitHubClient {
             repository: { name: string; nameWithOwner: string };
             assignees: Array<{ login: string }>;
             url: string;
-        }>>(args);
+        }>>(args, { retry: true });
 
         return results.map(issue => ({
             id: issue.number,
@@ -226,7 +232,7 @@ export class GitHubClient {
             'issue', 'view', String(number),
             '--repo', `${owner}/${repo}`,
             '--json', 'number,title,body,state,labels,milestone,assignees,url',
-        ]);
+        ], { retry: true });
 
         return {
             id: result.number,
@@ -255,19 +261,20 @@ export class GitHubClient {
         ];
 
         if (data.state === 'closed') {
-            // Close via separate command
+            // Close via separate command — closing an already-closed issue is a safe no-op, so retry is safe.
             await this.ghRaw([
                 'issue', 'close', String(number),
                 '--repo', `${owner}/${repo}`,
-            ]);
+            ], { retry: true });
             return;
         }
 
         if (data.state === 'open') {
+            // Reopening an already-open issue is a safe no-op, so retry is safe.
             await this.ghRaw([
                 'issue', 'reopen', String(number),
                 '--repo', `${owner}/${repo}`,
-            ]);
+            ], { retry: true });
             return;
         }
 
@@ -278,8 +285,24 @@ export class GitHubClient {
         }
 
         if (args.length > 4) {
-            await this.ghRaw(args);
+            // Re-adding an already-present label is a safe no-op, so retry is safe.
+            await this.ghRaw(args, { retry: true });
         }
+    }
+
+    /** Create an issue; throws (unlike createPullRequest) if URL parse fails — a 0 would corrupt githubRef */
+    async createIssue(owner: string, repo: string, data: { title: string; body?: string }): Promise<{ number: number; html_url: string }> {
+        const url = await this.ghRaw([
+            'issue', 'create',
+            '--repo', `${owner}/${repo}`,
+            '--title', data.title,
+            '--body', data.body ?? '',
+        ]);
+        const parsed = parsePrUrl(url);
+        if (!parsed) {
+            throw new Error(`gh issue create returned an unparseable URL: ${url}`);
+        }
+        return { number: parsed.number, html_url: url };
     }
 
     /** Create a pull request */
@@ -324,7 +347,7 @@ export class GitHubClient {
     async getCommitStatus(owner: string, repo: string, ref: string): Promise<GitHubCommitStatus> {
         return this.gh<GitHubCommitStatus>([
             'api', `repos/${owner}/${repo}/commits/${ref}/status`,
-        ]);
+        ], { retry: true });
     }
 
     /** List repos accessible to the user (personal + org) */
@@ -338,12 +361,12 @@ export class GitHubClient {
             args.push(owner);
         }
         args.push('--limit', '100', '--json', 'nameWithOwner,description,isPrivate');
-        return this.gh(args);
+        return this.gh(args, { retry: true });
     }
 
     /** List orgs the user belongs to */
     async listOrgs(): Promise<string[]> {
-        const output = await this.ghRaw(['org', 'list']);
+        const output = await this.ghRaw(['org', 'list'], { retry: true });
         if (!output) return [];
         return output.split('\n').filter(Boolean);
     }

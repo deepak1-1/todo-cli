@@ -83,6 +83,8 @@ export function runMigrations(db: Database.Database): string[] {
     // Run self-managed migrations outside any transaction (they handle their own).
     // A migration may call markApplied() inside its own transaction to record completion
     // atomically with its schema change; otherwise the runner records it afterwards.
+    // The fallback below is only crash-safe for idempotent migrations — a non-idempotent
+    // self-managed migration MUST call markApplied() inside its own transaction.
     for (const migration of selfManaged) {
         let recorded = false;
         const markApplied = () => {

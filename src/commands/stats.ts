@@ -7,7 +7,7 @@ import { formatDuration } from '../core/timer.js';
 import { PRIORITY_ORDER } from '../core/types.js';
 import type { TaskFilters } from '../core/types.js';
 import { fuzzySearch } from '../core/filter.js';
-import { parseRelativeDuration, formatDateDisplay, todayLocal, toLocalDateString, parseSqliteUtc } from '../utils/date.js';
+import { parseRelativeDuration, formatDateDisplay, todayLocal, toLocalDateString, parseSqliteUtc, parseDisplayDate } from '../utils/date.js';
 import type { TrackingSession } from '../storage/repositories/tracking.repo.js';
 import { priorityChalkFn, statusChalkFn } from '../utils/format.js';
 import { theme } from '../utils/theme.js';
@@ -41,7 +41,7 @@ export function getDateRange(opts: { today?: boolean; weekly?: boolean; monthly?
     }
 
     if (opts.last) {
-        const baseDate = opts.to ? new Date(opts.to) : now;
+        const baseDate = opts.to ? parseDisplayDate(opts.to) : now;
         const fromDate = parseRelativeDuration(opts.last, baseDate);
         if (!fromDate) {
             throw new Error(`Invalid --last format "${opts.last}". Use a number followed by d (days), m (months), or y (years). Examples: 7d, 3m, 1y`);
@@ -190,7 +190,7 @@ Examples:
         for (const tk of tasks) {
             const statusColor = statusChalkFn(tk.status, defs);
             const priorityColor = priorityChalkFn(tk.priority);
-            const createdDate = tk.createdAt ? formatDateDisplay(tk.createdAt) : '-';
+            const createdDate = tk.createdAt ? formatDateDisplay(toLocalDateString(parseSqliteUtc(tk.createdAt))) : '-';
             const workedDates = (workedDatesMap.get(tk.id) || []).map(d => formatDateDisplay(d));
             const workedOn = workedDates.length > 0 ? workedDates.join(', ') : t.muted.chalk('-');
             const statusLabel = defs.find(d => d.key === tk.status)?.label ?? tk.status;

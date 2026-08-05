@@ -1,7 +1,8 @@
 // JSON output shapes and emitter for mutating commands with --json flag
 
 export interface JsonSuccess<T = unknown> {
-    ok: true;
+    // true for full success; false for a partial-result payload (e.g. bulk N-of-M failures)
+    ok: boolean;
     command: string;
     data?: T;
     recurring?: { id: number; dueDate: string };

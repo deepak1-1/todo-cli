@@ -190,6 +190,68 @@ describe('StatusRepository.update', () => {
         expect(repo.getByKeyOrVerb('on_hold')).toBeUndefined();
         expect(repo.getByKeyOrVerb('paused')?.key).toBe('paused');
     });
+
+    it('renames an in-use custom status and remaps its tasks', () => {
+        repo.create({ key: 'on_hold', label: 'On Hold', verb: 'hold' });
+        const task = taskRepo.create({ title: 'blocked on infra' });
+        taskRepo.update(task.id, { status: 'on_hold' });
+
+        expect(() => repo.update('on_hold', { newKey: 'paused' })).not.toThrow();
+
+        expect(repo.getByKeyOrVerb('on_hold')).toBeUndefined();
+        expect(repo.getByKeyOrVerb('paused')?.key).toBe('paused');
+        expect(taskRepo.getById(task.id)?.status).toBe('paused');
+    });
+
+    it('renames an in-use status with multiple tasks', () => {
+        repo.create({ key: 'on_hold', label: 'On Hold', verb: 'hold' });
+        const taskA = taskRepo.create({ title: 'a' });
+        const taskB = taskRepo.create({ title: 'b' });
+        taskRepo.update(taskA.id, { status: 'on_hold' });
+        taskRepo.update(taskB.id, { status: 'on_hold' });
+
+        repo.update('on_hold', { newKey: 'paused' });
+
+        expect(taskRepo.getById(taskA.id)?.status).toBe('paused');
+        expect(taskRepo.getById(taskB.id)?.status).toBe('paused');
+    });
+
+    it('does not remap tasks on other statuses during rename', () => {
+        repo.create({ key: 'on_hold', label: 'On Hold', verb: 'hold' });
+        const taskA = taskRepo.create({ title: 'a' });
+        const taskB = taskRepo.create({ title: 'b' });
+        taskRepo.update(taskA.id, { status: 'on_hold' });
+        taskRepo.update(taskB.id, { status: 'todo' });
+
+        repo.update('on_hold', { newKey: 'paused' });
+
+        expect(taskRepo.getById(taskA.id)?.status).toBe('paused');
+        expect(taskRepo.getById(taskB.id)?.status).toBe('todo');
+    });
+
+    it('rename combined with a label change remaps tasks and applies label', () => {
+        repo.create({ key: 'on_hold', label: 'On Hold', verb: 'hold' });
+        const task = taskRepo.create({ title: 'x' });
+        taskRepo.update(task.id, { status: 'on_hold' });
+
+        const updated = repo.update('on_hold', { newKey: 'paused', label: 'Paused' });
+
+        expect(updated.label).toBe('Paused');
+        expect(taskRepo.getById(task.id)?.status).toBe('paused');
+    });
+
+    it('rename to an existing key rolls back atomically', () => {
+        repo.create({ key: 'on_hold', label: 'On Hold', verb: 'hold' });
+        repo.create({ key: 'paused', label: 'Paused', verb: 'pause' });
+        const task = taskRepo.create({ title: 'x' });
+        taskRepo.update(task.id, { status: 'on_hold' });
+
+        expect(() => repo.update('on_hold', { newKey: 'paused' })).toThrow();
+
+        expect(repo.getByKeyOrVerb('on_hold')?.key).toBe('on_hold');
+        expect(repo.getByKeyOrVerb('paused')?.key).toBe('paused');
+        expect(taskRepo.getById(task.id)?.status).toBe('on_hold');
+    });
 });
 
 // ──────────────────────────────────────────────

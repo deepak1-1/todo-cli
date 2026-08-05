@@ -4,7 +4,7 @@ import type Database from 'better-sqlite3';
 
 export const requiresNoTransaction = true;
 
-export function up(db: Database.Database): void {
+export function up(db: Database.Database, markApplied?: () => void): void {
     db.pragma('foreign_keys = OFF');
     db.pragma('legacy_alter_table = ON');
 
@@ -114,6 +114,10 @@ export function up(db: Database.Database): void {
             CREATE INDEX idx_tasks_status_priority ON tasks(status, priority);
             CREATE INDEX idx_tasks_status_due      ON tasks(status, due_date);
         `);
+
+        // Record completion in the same transaction as the (non-idempotent) table
+        // rebuild, so a crash can never leave the schema changed but unrecorded.
+        markApplied?.();
     });
 
     migrate();

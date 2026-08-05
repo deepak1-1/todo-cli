@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
+import { format } from 'date-fns';
 import { createTestDb } from '../../src/storage/database.js';
 import { runMigrations } from '../../src/storage/migrations/runner.js';
 import { TrackingRepository } from '../../src/storage/repositories/tracking.repo.js';
 import { TaskRepository } from '../../src/storage/repositories/task.repo.js';
-import { todayLocal } from '../../src/utils/date.js';
+import { todayLocal, diffSeconds } from '../../src/utils/date.js';
 import { insertTrackingSession } from '../helpers/tracking.js';
 
 let db: Database.Database;
@@ -526,6 +527,71 @@ describe('TrackingRepository.getTimeReport', () => {
         const report = trackingRepo.getTimeReport(7);
         expect(report).toHaveLength(0);
     });
+
+    it('should include a session whose local date is on the cutoff but whose stored UTC date is one day earlier', () => {
+        const task = taskRepo.create({ title: 'Midnight straddle' });
+
+        // Process TZ is pinned to Asia/Kolkata (UTC+5:30). For days=1 the local cutoff is
+        // "yesterday". A session at local yesterday 00:30 is stored as UTC two-days-ago 19:00 —
+        // the raw UTC string sorts BEFORE the local cutoff date, so the unfixed query drops it.
+        const localMidnightYesterday = new Date();
+        localMidnightYesterday.setDate(localMidnightYesterday.getDate() - 1);
+        localMidnightYesterday.setHours(0, 30, 0, 0);
+        const startedAtUtc = localMidnightYesterday.toISOString().slice(0, 19).replace('T', ' ');
+        const endedAtUtc = new Date(localMidnightYesterday.getTime() + 15 * 60 * 1000)
+            .toISOString()
+            .slice(0, 19)
+            .replace('T', ' ');
+        insertSession(task.id, startedAtUtc, endedAtUtc, 900);
+
+        const report = trackingRepo.getTimeReport(1);
+        expect(report).toHaveLength(1);
+        expect(report[0].taskTitle).toBe('Midnight straddle');
+        expect(report[0].totalTime).toBe(900);
+    });
+
+    it('should window by local calendar day at the boundary', () => {
+        const onCutoff = taskRepo.create({ title: 'On cutoff' });
+        const beforeCutoff = taskRepo.create({ title: 'Before cutoff' });
+
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - 1);
+        const cutoffLocal = format(cutoffDate, 'yyyy-MM-dd');
+
+        const beforeDate = new Date();
+        beforeDate.setDate(beforeDate.getDate() - 2);
+        const beforeLocal = format(beforeDate, 'yyyy-MM-dd');
+
+        insertSession(onCutoff.id, `${cutoffLocal} 12:00:00`, `${cutoffLocal} 12:30:00`, 1800);
+        insertSession(beforeCutoff.id, `${beforeLocal} 12:00:00`, `${beforeLocal} 12:30:00`, 1800);
+
+        const report = trackingRepo.getTimeReport(1);
+        expect(report).toHaveLength(1);
+        expect(report[0].taskTitle).toBe('On cutoff');
+    });
+
+    it('should agree with getWorkedDates for the same straddling session', () => {
+        const task = taskRepo.create({ title: 'Cross-check task' });
+
+        // Local date is yesterday (on the days=1 cutoff), stored UTC date is one day earlier still.
+        const localMidnightYesterday = new Date();
+        localMidnightYesterday.setDate(localMidnightYesterday.getDate() - 1);
+        localMidnightYesterday.setHours(0, 30, 0, 0);
+        const expectedLocalDate = format(localMidnightYesterday, 'yyyy-MM-dd');
+        const startedAtUtc = localMidnightYesterday.toISOString().slice(0, 19).replace('T', ' ');
+        const endedAtUtc = new Date(localMidnightYesterday.getTime() + 15 * 60 * 1000)
+            .toISOString()
+            .slice(0, 19)
+            .replace('T', ' ');
+        insertSession(task.id, startedAtUtc, endedAtUtc, 900);
+
+        const report = trackingRepo.getTimeReport(1);
+        const workedDates = trackingRepo.getWorkedDates([task.id]);
+
+        expect(report).toHaveLength(1);
+        expect(report[0].taskId).toBe(task.id);
+        expect(workedDates.get(task.id)).toEqual([expectedLocalDate]);
+    });
 });
 
 // ----------------------------------------------------------------
@@ -590,6 +656,18 @@ describe('TrackingRepository stop shape', () => {
         expect(stopped).not.toBeNull();
         expect(stopped!.duration).toBeGreaterThan(0);
         expect(stopped!.endedAt).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    });
+
+    it('should compute duration identical to diffSeconds(startedAt, endedAt)', () => {
+        const task = taskRepo.create({ title: 'diffSeconds parity' });
+        // Started exactly 90 seconds in the past, second-truncated like nowSqliteUtc()
+        const startedAt = new Date(Date.now() - 90_000).toISOString().replace('T', ' ').slice(0, 19);
+        insertSession(task.id, startedAt, null, 0);
+
+        const stopped = trackingRepo.stop(task.id);
+        expect(stopped).not.toBeNull();
+        expect(stopped!.duration).toBe(diffSeconds(startedAt, stopped!.endedAt!));
+        expect(stopped!.duration).toBe(90);
     });
 });
 

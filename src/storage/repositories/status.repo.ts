@@ -134,7 +134,23 @@ export class StatusRepository {
 
         if (sets.length === 0) return existing;
         params.push(key);
-        this.db.prepare(`UPDATE statuses SET ${sets.join(', ')} WHERE key = ?`).run(...params);
+
+        const isRename = changes.newKey !== undefined && changes.newKey !== existing.key;
+        const updateStatusStmt = this.db.prepare(`UPDATE statuses SET ${sets.join(', ')} WHERE key = ?`);
+
+        if (isRename) {
+            // Rename must remap tasks.status in the same transaction — the FK has no ON UPDATE CASCADE
+            const remapTasksStmt = this.db.prepare('UPDATE tasks SET status = ? WHERE status = ?');
+            const renameTx = this.db.transaction((newKey: string, oldKey: string) => {
+                this.db.pragma('defer_foreign_keys = ON');
+                updateStatusStmt.run(...params);
+                remapTasksStmt.run(newKey, oldKey);
+            });
+            renameTx(changes.newKey as string, key);
+        } else {
+            updateStatusStmt.run(...params);
+        }
+
         this.invalidate();
         return this.getByKeyOrVerb(changes.newKey ?? key)!;
     }

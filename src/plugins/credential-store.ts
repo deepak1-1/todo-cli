@@ -1,4 +1,4 @@
-// Encrypted credential storage with per-provider HKDF-SHA256 key derivation
+// Encrypted credential storage with per-provider HKDF-SHA256 key derivation from a stable machine key
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -20,6 +20,10 @@ export class CredentialFileCorruptError extends Error {
 const DEFAULT_CREDENTIALS_DIR = getDataDir();
 const DEFAULT_CREDENTIALS_FILE = path.join(DEFAULT_CREDENTIALS_DIR, 'credentials.json');
 const DEFAULT_SALT_FILE = path.join(DEFAULT_CREDENTIALS_DIR, '.salt');
+const DEFAULT_MACHINE_KEY_FILE = path.join(DEFAULT_CREDENTIALS_DIR, '.machinekey');
+
+// Machine key must be exactly 32 random bytes (256 bits)
+const MACHINE_KEY_BYTES = 32;
 
 // Legacy entry shape: no `v` field
 interface LegacyEntry {
@@ -28,7 +32,7 @@ interface LegacyEntry {
     authTag: string;
 }
 
-// v2 entry shape: per-provider HKDF key
+// v2 entry shape: per-provider HKDF key derived from the low-entropy hostname master key
 interface V2Entry {
     v: 2;
     cipher: string;
@@ -36,7 +40,15 @@ interface V2Entry {
     authTag: string;
 }
 
-type StoredEntry = LegacyEntry | V2Entry;
+// v3 entry shape: per-provider HKDF key derived from the high-entropy machine key
+interface V3Entry {
+    v: 3;
+    cipher: string;
+    iv: string;
+    authTag: string;
+}
+
+type StoredEntry = LegacyEntry | V2Entry | V3Entry;
 
 interface CredentialsFile {
     [key: string]: StoredEntry;
@@ -52,11 +64,18 @@ export class EncryptedCredentialStore implements CredentialStore {
     private readonly credentialsDir: string;
     private readonly credentialsFile: string;
     private readonly saltFile: string;
+    private readonly machineKeyFile: string;
 
-    constructor(paths?: { credentialsDir?: string; credentialsFile?: string; saltFile?: string }) {
+    constructor(paths?: {
+        credentialsDir?: string;
+        credentialsFile?: string;
+        saltFile?: string;
+        machineKeyFile?: string;
+    }) {
         this.credentialsDir = paths?.credentialsDir ?? DEFAULT_CREDENTIALS_DIR;
         this.credentialsFile = paths?.credentialsFile ?? DEFAULT_CREDENTIALS_FILE;
         this.saltFile = paths?.saltFile ?? DEFAULT_SALT_FILE;
+        this.machineKeyFile = paths?.machineKeyFile ?? DEFAULT_MACHINE_KEY_FILE;
     }
 
     // Public no-op stub; callers can wire auto-migration later
@@ -78,23 +97,46 @@ export class EncryptedCredentialStore implements CredentialStore {
         return salt;
     }
 
-    // Derives the master key from hostname:username + salt via PBKDF2
-    private getMasterKey(): Buffer {
+    // Reads or creates the persistent high-entropy machine key (256 random bits, 0600 perms)
+    private getOrCreateMachineKey(): Buffer {
+        this.ensureDir();
+        if (fs.existsSync(this.machineKeyFile)) {
+            const key = Buffer.from(fs.readFileSync(this.machineKeyFile, 'utf8'), 'hex');
+            if (key.length !== MACHINE_KEY_BYTES) {
+                throw new Error(
+                    `Machine key file is corrupt (expected ${MACHINE_KEY_BYTES} bytes, got ${key.length}): ${this.machineKeyFile}. Restore it from backup or re-authenticate to generate a new one.`,
+                );
+            }
+            return key;
+        }
+        const machineKey = crypto.randomBytes(MACHINE_KEY_BYTES);
+        fs.writeFileSync(this.machineKeyFile, machineKey.toString('hex'), { encoding: 'utf8', mode: 0o600 });
+        return machineKey;
+    }
+
+    // Derives the master key from the stable machine key + salt via PBKDF2 (stable across hostname/user changes)
+    private deriveMachineMasterKey(): Buffer {
+        const machineKey = this.getOrCreateMachineKey();
+        const salt = this.getOrCreateSalt();
+        return crypto.pbkdf2Sync(machineKey, salt, 100000, 32, 'sha256');
+    }
+
+    // Derives the legacy master key from hostname:username + salt via PBKDF2 (backward-compat decrypt only)
+    private deriveLegacyMasterKey(): Buffer {
         const passphrase = `${os.hostname()}:${os.userInfo().username}`;
         const salt = this.getOrCreateSalt();
         return crypto.pbkdf2Sync(passphrase, salt, 100000, 32, 'sha256');
     }
 
-    // Derives a per-provider key from the master key + salt via HKDF-SHA256
-    private deriveProviderKey(namespace: string): Buffer {
-        const masterKey = this.getMasterKey();
+    // Derives a per-provider key from a given master key + salt via HKDF-SHA256
+    private deriveProviderKey(namespace: string, masterKey: Buffer): Buffer {
         const salt = this.getOrCreateSalt();
         return Buffer.from(crypto.hkdfSync('sha256', masterKey, salt, namespace, 32));
     }
 
-    // Encrypts plaintext with the provider key for the given credential key; always writes v:2
-    private encrypt(plaintext: string, key: string): V2Entry {
-        const derivedKey = this.deriveProviderKey(namespaceOf(key));
+    // Encrypts plaintext with the provider key for the given credential key; always writes v:3
+    private encrypt(plaintext: string, key: string): V3Entry {
+        const derivedKey = this.deriveProviderKey(namespaceOf(key), this.deriveMachineMasterKey());
         const iv = crypto.randomBytes(12);
         const cipher = crypto.createCipheriv('aes-256-gcm', derivedKey, iv);
 
@@ -102,19 +144,22 @@ export class EncryptedCredentialStore implements CredentialStore {
         encrypted += cipher.final('hex');
 
         return {
-            v: 2,
+            v: 3,
             cipher: encrypted,
             iv: iv.toString('hex'),
             authTag: cipher.getAuthTag().toString('hex'),
         };
     }
 
-    // Decrypts an entry: v2 uses provider key, legacy (no v) uses master key
+    // Decrypts an entry: v3 uses machine-key provider key, v2 uses legacy provider key, legacy (no v) uses legacy master key directly
     private decrypt(entry: StoredEntry, key: string): string {
+        const isV3 = (e: StoredEntry): e is V3Entry => (e as V3Entry).v === 3;
         const isV2 = (e: StoredEntry): e is V2Entry => (e as V2Entry).v === 2;
-        const derivedKey = isV2(entry)
-            ? this.deriveProviderKey(namespaceOf(key))
-            : this.getMasterKey();
+        const derivedKey = isV3(entry)
+            ? this.deriveProviderKey(namespaceOf(key), this.deriveMachineMasterKey())
+            : isV2(entry)
+              ? this.deriveProviderKey(namespaceOf(key), this.deriveLegacyMasterKey())
+              : this.deriveLegacyMasterKey();
 
         const iv = Buffer.from(entry.iv, 'hex');
         const authTag = Buffer.from(entry.authTag, 'hex');
@@ -175,9 +220,9 @@ export class EncryptedCredentialStore implements CredentialStore {
             return null;
         }
 
-        // Opportunistic auto-migration: re-encrypt legacy entry as v2 behind try/catch
-        const isLegacy = (e: StoredEntry): boolean => (e as V2Entry).v !== 2;
-        if (isLegacy(entry)) {
+        // Opportunistic auto-migration: re-encrypt legacy/v2 entry as v3 (machine key) behind try/catch
+        const needsUpgrade = (e: StoredEntry): boolean => (e as V3Entry).v !== 3;
+        if (needsUpgrade(entry)) {
             try {
                 await this.set(key, plaintext);
             } catch (err) {
@@ -200,9 +245,9 @@ export class EncryptedCredentialStore implements CredentialStore {
         try {
             const plaintext = this.decrypt(entry, key);
 
-            // Opportunistic auto-migration: re-encrypt legacy entry as v2 behind try/catch
-            const isLegacy = (e: StoredEntry): boolean => (e as V2Entry).v !== 2;
-            if (isLegacy(entry)) {
+            // Opportunistic auto-migration: re-encrypt legacy/v2 entry as v3 (machine key) behind try/catch
+            const needsUpgrade = (e: StoredEntry): boolean => (e as V3Entry).v !== 3;
+            if (needsUpgrade(entry)) {
                 try {
                     await this.set(key, plaintext);
                 } catch (err) {

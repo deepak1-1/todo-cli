@@ -6,15 +6,14 @@ import { Command } from 'commander';
 import { getContext } from './context.js';
 import { theme } from '../utils/theme.js';
 import { handleRecurringCompletion, validateUpdateInput, wouldCreateParentCycle } from '../core/task.js';
-import { parseDate } from '../utils/date.js';
+import { parseDate, formatDateDisplay } from '../utils/date.js';
 import { success, error, formatStatus, parseId, parseStrictPositiveInt } from '../utils/format.js';
 import { fail, EXIT, requireEntity } from '../utils/exit.js';
 import { emitJson } from '../utils/json-output.js';
 import { VALID_RECURRENCES, normalizePriority, PRIORITY_ERROR } from '../core/types.js';
 import type { Task, TaskPriority, RecurrencePattern, EditOptions } from '../core/types.js';
 import type { AppContext } from './context.js';
-import { findByKeyOrVerb, getTransitionTimestamps, validStatusKeys } from '../core/status.js';
-import { format } from 'date-fns';
+import { findByKeyOrVerb, getTransitionTimestamps, isComplete, validStatusKeys } from '../core/status.js';
 
 /** Pure mutating core for edit: validate, apply, hook, log. Throws on invalid input. */
 export function applyEdit(
@@ -120,12 +119,12 @@ export function applyEdit(
     }
 
     let recurring: { id: number; dueDate: string } | undefined;
-    const completingStatus = targetStatus && defs.find(d => d.key === targetStatus && d.completes);
-    if (completingStatus && task.recurrence) {
+    const wasComplete = isComplete(defs, task.status);
+    const nowComplete = !!targetStatus && isComplete(defs, targetStatus);
+    if (nowComplete && !wasComplete && task.recurrence) {
         const newTask = handleRecurringCompletion(task, ctx.taskRepo, ctx.tagRepo);
         if (newTask) {
-            const nextDue = newTask.dueDate ? new Date(newTask.dueDate) : new Date();
-            recurring = { id: newTask.id, dueDate: nextDue.toISOString() };
+            recurring = { id: newTask.id, dueDate: newTask.dueDate ?? '' };
         }
     }
 
@@ -165,16 +164,24 @@ export function executeEdit(id: number, opts: EditOptions, { silent = false, jso
     const { task: updated, recurring: recurringInfo } = result;
 
     // Handle dependencies (CLI-only; not exposed via MCP tools)
+    let depsOk = true;
     if (opts.depends && opts.depends.length > 0) {
-        handleDependencyOption(id, opts.depends, 'depends', ctx, json);
+        depsOk = handleDependencyOption(id, opts.depends, 'depends', ctx, json) && depsOk;
     }
 
     if (opts.blocks && opts.blocks.length > 0) {
-        handleDependencyOption(id, opts.blocks, 'blocks', ctx, json);
+        depsOk = handleDependencyOption(id, opts.blocks, 'blocks', ctx, json) && depsOk;
+    }
+
+    const depsAttempted = (opts.depends && opts.depends.length > 0) || (opts.blocks && opts.blocks.length > 0);
+
+    // A bad/missing/cyclic dependency reports failure instead of a silent ok:true
+    if (depsAttempted && !depsOk) {
+        return fail(EXIT.NOT_FOUND, 'One or more dependency updates failed (task not found or would create a cycle)', { json, command: 'edit' });
     }
 
     // Log dependency actions
-    if ((opts.depends && opts.depends.length > 0) || (opts.blocks && opts.blocks.length > 0)) {
+    if (depsAttempted) {
         if (!opts.status) {
             ctx.actionLog.log({
                 taskId: id,
@@ -187,9 +194,8 @@ export function executeEdit(id: number, opts: EditOptions, { silent = false, jso
     }
 
     if (recurringInfo && !silent && !json) {
-        const nextDue = new Date(recurringInfo.dueDate);
         console.log(
-            success(`Created recurring task ${theme().heading.chalk('#' + recurringInfo.id)} (due: ${format(nextDue, 'MMM d yyyy')} | ${format(nextDue, 'EEE').toUpperCase()})`),
+            success(`Created recurring task ${theme().heading.chalk('#' + recurringInfo.id)} (due: ${formatDateDisplay(recurringInfo.dueDate)})`),
         );
     }
 
@@ -205,13 +211,15 @@ export function executeEdit(id: number, opts: EditOptions, { silent = false, jso
     }
 }
 
+/** Applies +/- dependency edits; returns false if any op was invalid/missing/would-cycle */
 function handleDependencyOption(
     taskId: number,
     inputs: string[],
     direction: 'depends' | 'blocks',
     ctx: ReturnType<typeof getContext>,
-    silent = false,
-): void {
+    json = false,
+): boolean {
+    let hadError = false;
     for (const input of inputs) {
         const parts = input.split(',').map(s => s.trim()).filter(Boolean);
         for (const part of parts) {
@@ -222,12 +230,14 @@ function handleDependencyOption(
 
             if (isNaN(depId)) {
                 console.error(error(`Invalid dependency ID: ${part}`));
+                hadError = true;
                 continue;
             }
 
             const depTask = ctx.taskRepo.getById(depId);
             if (!depTask) {
                 console.error(error(`Task #${depId} not found`));
+                hadError = true;
                 continue;
             }
 
@@ -236,7 +246,7 @@ function handleDependencyOption(
 
             if (isRemove) {
                 ctx.depRepo.remove(fromId, toId);
-                if (!silent) {
+                if (!json) {
                     if (direction === 'depends') {
                         console.log(success(`Removed dependency #${taskId} → #${depId}`));
                     } else {
@@ -246,10 +256,11 @@ function handleDependencyOption(
             } else {
                 if (ctx.depRepo.wouldCreateCycle(fromId, toId)) {
                     console.error(error(`Adding dependency would create a cycle`));
+                    hadError = true;
                     continue;
                 }
                 ctx.depRepo.add(fromId, toId);
-                if (!silent) {
+                if (!json) {
                     if (direction === 'depends') {
                         console.log(success(`#${taskId} now depends on #${depId}`));
                     } else {
@@ -259,6 +270,7 @@ function handleDependencyOption(
             }
         }
     }
+    return !hadError;
 }
 
 export const editCommand = new Command('edit')

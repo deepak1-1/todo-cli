@@ -114,6 +114,36 @@ describe('filterAndSearchTasks', () => {
         const { filters } = filterAndSearchTasks(ctx, { priority: 'urgent' });
         expect(filters.priority).toBe('urgent');
     });
+
+    it('finds a search match beyond an explicit row limit by capping matches, not the fetch', () => {
+        for (let i = 0; i < 10; i++) {
+            ctx.taskRepo.create({ title: `Filler ${i}`, priority: 'low' });
+        }
+        ctx.taskRepo.create({ title: 'Pay invoice ACME', priority: 'low' });
+
+        // limit is smaller than the total row count, so a pre-search cap would hide the match
+        const { tasks } = filterAndSearchTasks(ctx, { search: 'invoice', limit: 3 });
+        expect(tasks).toHaveLength(1);
+        expect(tasks[0].title).toBe('Pay invoice ACME');
+    });
+
+    it('caps search matches at the limit when more matches exist than the limit', () => {
+        for (let i = 0; i < 5; i++) {
+            ctx.taskRepo.create({ title: `Invoice batch ${i}`, priority: 'low' });
+        }
+
+        const { tasks } = filterAndSearchTasks(ctx, { search: 'invoice', limit: 2 });
+        expect(tasks).toHaveLength(2);
+    });
+
+    it('non-search limit still applies at the DB level (unchanged behavior)', () => {
+        ctx.taskRepo.create({ title: 'Task A' });
+        ctx.taskRepo.create({ title: 'Task B' });
+        ctx.taskRepo.create({ title: 'Task C' });
+
+        const { tasks } = filterAndSearchTasks(ctx, { limit: 2 });
+        expect(tasks).toHaveLength(2);
+    });
 });
 
 // ─── buildFilters — --parent validation ────────────────────────────────────────

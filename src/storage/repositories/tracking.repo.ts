@@ -5,7 +5,7 @@
 import type Database from 'better-sqlite3';
 import type { TrackingSessionRow } from './rows.js';
 import { makeMapper, nullable, stringOrEmpty } from './mapper.js';
-import { nowSqliteUtc, sqliteUtcFromDate, parseSqliteUtc } from '../../utils/date.js';
+import { nowSqliteUtc, sqliteUtcFromDate, parseSqliteUtc, diffSeconds } from '../../utils/date.js';
 
 export interface TrackingSession {
     id: number;
@@ -68,9 +68,7 @@ export class TrackingRepository {
         if (!active) return null;
 
         const now = nowSqliteUtc();
-        const startTime = parseSqliteUtc(active.startedAt).getTime();
-        const endTime = parseSqliteUtc(now).getTime();
-        const duration = Math.round((endTime - startTime) / 1000);
+        const duration = diffSeconds(active.startedAt, now);
 
         this.db.prepare(
             'UPDATE time_tracking SET ended_at = ?, duration = ? WHERE id = ?'
@@ -165,7 +163,7 @@ export class TrackingRepository {
                    SUM(tt.duration) as totalTime, COUNT(*) as sessions
             FROM time_tracking tt
             JOIN tasks t ON tt.task_id = t.id
-            WHERE tt.started_at >= date('now', 'localtime', '-' || ? || ' days') AND tt.ended_at IS NOT NULL
+            WHERE date(tt.started_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days') AND tt.ended_at IS NOT NULL
             GROUP BY tt.task_id
             ORDER BY totalTime DESC
         `).all(days) as { taskId: number; taskTitle: string; totalTime: number; sessions: number }[];

@@ -162,6 +162,29 @@ describe('add command --json', () => {
         logSpy.mockRestore();
         expect(stdoutWrite).toBe('');
     });
+
+    it('regression: --depends nonexistent emits ok:false and creates no task', async () => {
+        ctx.taskRepo.create({ title: 'Base' });
+        const before = ctx.taskRepo.list({}).length;
+        const { addCommand } = await import('../../src/commands/add.js');
+        const payload = captureJsonOutput<JsonError>(() => {
+            addCommand.parse(['Fix login', '--depends', '999', '--json'], { from: 'user' });
+        });
+        expect(payload.ok).toBe(false);
+        expect(payload.error.code).toBe(3);
+        expect(ctx.taskRepo.list({}).length).toBe(before);
+    });
+
+    it('--depends valid emits ok:true and inserts the dependency', async () => {
+        const base = ctx.taskRepo.create({ title: 'Base' });
+        const { addCommand } = await import('../../src/commands/add.js');
+        const payload = captureJsonOutput<JsonSuccess>(() => {
+            addCommand.parse(['Real dep', '--depends', String(base.id), '--json'], { from: 'user' });
+        });
+        expect(payload.ok).toBe(true);
+        const data = payload.data as Record<string, unknown>;
+        expect(ctx.depRepo.getDependencies(data.id as number)).toEqual([base.id]);
+    });
 });
 
 // ──────────────────────────────────────────────
@@ -241,6 +264,57 @@ describe('edit command --json', () => {
         expect(payload.error.code).toBe(3);
     });
 
+    it('regression: --depends +nonexistent emits ok:false (was silently ok:true)', async () => {
+        const task = ctx.taskRepo.create({ title: 'Edit me' });
+        const { editCommand } = await import('../../src/commands/edit.js');
+        const payload = captureJsonOutput<JsonError>(() => {
+            editCommand.parse([String(task.id), '--depends', '+999', '--json'], { from: 'user' });
+        });
+        expect(payload.ok).toBe(false);
+        expect(payload.error.code).toBe(3);
+    });
+
+    it('regression: --blocks +nonexistent emits ok:false', async () => {
+        const task = ctx.taskRepo.create({ title: 'Edit me' });
+        const { editCommand } = await import('../../src/commands/edit.js');
+        const payload = captureJsonOutput<JsonError>(() => {
+            editCommand.parse([String(task.id), '--blocks', '+999', '--json'], { from: 'user' });
+        });
+        expect(payload.ok).toBe(false);
+        expect(payload.error.code).toBe(3);
+    });
+
+    it('--depends +valid +invalid: valid dep applied, json still reports ok:false', async () => {
+        const task = ctx.taskRepo.create({ title: 'Edit me' });
+        const dep = ctx.taskRepo.create({ title: 'Dep' });
+        const { editCommand } = await import('../../src/commands/edit.js');
+        const payload = captureJsonOutput<JsonError>(() => {
+            editCommand.parse([String(task.id), '--depends', `+${dep.id}`, '+999', '--json'], { from: 'user' });
+        });
+        expect(payload.ok).toBe(false);
+        expect(ctx.depRepo.getDependencies(task.id)).toContain(dep.id);
+    });
+
+    it('--status done with a bad --depends: status applies, json ok:false, no spurious update log', async () => {
+        const task = ctx.taskRepo.create({ title: 'Edit me' });
+        const { executeEdit } = await import('../../src/commands/edit.js');
+        let captured = '';
+        const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+            captured += chunk;
+            return true;
+        });
+        vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        executeEdit(task.id, { status: 'done', depends: ['+999'] }, { json: true });
+        spy.mockRestore();
+        vi.restoreAllMocks();
+        const payload = JSON.parse(captured.trim()) as JsonError;
+        expect(payload.ok).toBe(false);
+        const actions = ctx.actionLog.getByTaskId(task.id).map(a => a.action);
+        expect(actions).toContain('status_done');
+        expect(actions).not.toContain('update');
+    });
+
     it('regression: edit rejects --status as unknown option', async () => {
         // --status was removed from edit; it must be treated as unknown option
         const task = ctx.taskRepo.create({ title: 'Transition test' });
@@ -278,6 +352,60 @@ describe('edit command --json', () => {
         expect(payload.recurring).toBeDefined();
         expect(typeof payload.recurring?.id).toBe('number');
         expect(typeof payload.recurring?.dueDate).toBe('string');
+        // Regression: dueDate must stay a date-only "YYYY-MM-DD" string (matches the new
+        // task's stored dueDate), not an instant re-wrapped via new Date().toISOString().
+        const newTask = ctx.taskRepo.getById(payload.recurring!.id as number);
+        expect(payload.recurring?.dueDate).toBe(newTask?.dueDate);
+        expect(payload.recurring?.dueDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    });
+
+    it('does not include recurring info when re-completing an already-done recurring task', async () => {
+        const task = ctx.taskRepo.create({ title: 'Recurring', recurrence: 'daily' });
+        ctx.taskRepo.update(task.id, { status: 'in_progress' });
+        const { executeEdit } = await import('../../src/commands/edit.js');
+        vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        // First completion spawns the next occurrence.
+        let captured = '';
+        let spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+            captured += chunk;
+            return true;
+        });
+        executeEdit(task.id, { status: 'done' }, { json: true });
+        spy.mockRestore();
+        const first = JSON.parse(captured.trim()) as JsonSuccess;
+        expect(first.recurring).toBeDefined();
+        const tasksAfterFirst = ctx.taskRepo.list({}).length;
+        // Re-issuing done on the already-done task (e.g. accidental MCP retry) must not spawn another.
+        captured = '';
+        spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+            captured += chunk;
+            return true;
+        });
+        executeEdit(task.id, { status: 'done' }, { json: true });
+        spy.mockRestore();
+        vi.restoreAllMocks();
+        const second = JSON.parse(captured.trim()) as JsonSuccess;
+        expect(second.recurring).toBeUndefined();
+        expect(ctx.taskRepo.list({}).length).toBe(tasksAfterFirst);
+    });
+
+    it('recurring completion success message shows the correct local due date, not a UTC-shifted one', async () => {
+        const { executeEdit } = await import('../../src/commands/edit.js');
+        const { formatDateDisplay } = await import('../../src/utils/date.js');
+        const task = ctx.taskRepo.create({ title: 'Recurring display', recurrence: 'daily' });
+        ctx.taskRepo.update(task.id, { status: 'in_progress' });
+        let logged = '';
+        vi.spyOn(console, 'log').mockImplementation((msg: string) => { logged += msg; });
+        executeEdit(task.id, { status: 'done' }, { json: false });
+        vi.restoreAllMocks();
+        // Find the recurring task created by this completion and assert its dueDate,
+        // parsed through the same local-midnight-safe helper the display line now uses,
+        // is exactly what appears in the printed message — regardless of process TZ.
+        const tasks = ctx.taskRepo.list({});
+        const newTask = tasks.find(t => t.id !== task.id && t.recurrence === 'daily');
+        expect(newTask?.dueDate).toBeTruthy();
+        const expectedLabel = formatDateDisplay(newTask!.dueDate!);
+        expect(logged).toContain(expectedLabel);
     });
 
     it('human path: executeEdit with json=false emits no JSON to stdout.write', async () => {

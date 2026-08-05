@@ -82,6 +82,23 @@ export class TaskRepository {
         return row ? mapRow(row) : null;
     }
 
+    /**
+     * List distinct owner/repo prefixes from github_ref for tasks in a project.
+     * Relies on the owner/repo#N shape contract established by ref.ts.
+     * Pass null for project_id to query project-less tasks.
+     */
+    listGithubRepos(projectId: number | null): string[] {
+        const sql = projectId === null
+            ? `SELECT DISTINCT substr(github_ref, 1, instr(github_ref, '#') - 1) AS repo
+               FROM tasks WHERE github_ref IS NOT NULL AND project_id IS NULL AND instr(github_ref, '#') > 0`
+            : `SELECT DISTINCT substr(github_ref, 1, instr(github_ref, '#') - 1) AS repo
+               FROM tasks WHERE github_ref IS NOT NULL AND project_id = ? AND instr(github_ref, '#') > 0`;
+        const rows = projectId === null
+            ? this.db.prepare(sql).all() as { repo: string }[]
+            : this.db.prepare(sql).all(projectId) as { repo: string }[];
+        return rows.map(r => r.repo).filter(Boolean);
+    }
+
     /** Create a new task, returns the created task */
     create(input: CreateTaskInput & {
         jiraKey?: string; jiraId?: string; githubRef?: string;

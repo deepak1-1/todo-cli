@@ -13,6 +13,8 @@ import {
     parseSqliteUtc,
     diffSeconds,
     elapsedSecondsSince,
+    todayLocal,
+    daysAgoLocal,
 } from '../../src/utils/date.js';
 import { format, addDays, subDays, subMonths, subYears } from 'date-fns';
 
@@ -77,6 +79,18 @@ describe('formatDateDisplay', () => {
     it('should return the raw string for invalid dates', () => {
         expect(formatDateDisplay('not-a-date')).toBe('not-a-date');
     });
+
+    // Regression: date-only due dates were parsed as UTC midnight (`new Date(dateStr)`),
+    // which resolves to the previous local calendar day west of UTC. This invariant is
+    // TZ-agnostic — it fails on the old code west of UTC and passes east of UTC.
+    it('should show "Today" for a date-only string equal to todayLocal(), regardless of timezone offset', () => {
+        expect(formatDateDisplay(todayLocal())).toBe('Today');
+    });
+
+    it('should still parse a full "YYYY-MM-DD HH:mm:ss" timestamp via the instant path', () => {
+        const result = formatDateDisplay('2025-12-25 10:30:00');
+        expect(result).toBe('Dec 25 2025 | THU');
+    });
 });
 
 describe('isOverdue', () => {
@@ -97,6 +111,16 @@ describe('isOverdue', () => {
     it('should return false for today', () => {
         const today = format(new Date(), 'yyyy-MM-dd');
         expect(isOverdue(today)).toBe(false);
+    });
+
+    // Regression: west of UTC, `new Date('2026-07-13')` (UTC midnight) can still be
+    // "yesterday" locally on the morning of 2026-07-13, wrongly flagging it overdue.
+    it('should return false for todayLocal() regardless of timezone offset', () => {
+        expect(isOverdue(todayLocal())).toBe(false);
+    });
+
+    it('should return true for a date-only string one local day in the past', () => {
+        expect(isOverdue(daysAgoLocal(1))).toBe(true);
     });
 });
 
@@ -135,6 +159,10 @@ describe('isDueToday', () => {
     it('should return false for other dates', () => {
         const other = format(addDays(new Date(), 5), 'yyyy-MM-dd');
         expect(isDueToday(other)).toBe(false);
+    });
+
+    it('should return true for todayLocal() regardless of timezone offset', () => {
+        expect(isDueToday(todayLocal())).toBe(true);
     });
 });
 

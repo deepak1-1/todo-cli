@@ -9,6 +9,7 @@ import { makeTable } from '../utils/table.js';
 import { theme } from '../utils/theme.js';
 import { success, error, warn, parseIntOption } from '../utils/format.js';
 import { emitJson } from '../utils/json-output.js';
+import { reopenTargetKey } from '../core/status.js';
 
 export const undoCommand = new Command('undo')
     .description('Undo the last action')
@@ -26,7 +27,7 @@ export const undoCommand = new Command('undo')
             return;
         }
 
-        const defaultStatusKey = ctx.statusRepo.list().find(d => d.verb === 'reopen')?.key ?? 'todo';
+        const defaultStatusKey = reopenTargetKey(ctx.statusRepo.list());
 
         try {
             let undoneAction = '';

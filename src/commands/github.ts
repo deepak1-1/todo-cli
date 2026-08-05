@@ -3,12 +3,13 @@
 import { Command } from 'commander';
 import { getContext } from './context.js';
 import type { AppContext } from './context.js';
-import { reconcilePulledStatus, getTransitionTimestamps } from '../core/status.js';
+import { reconcilePulledStatus, getTransitionTimestamps, isComplete, isArchived, reopenTargetKey } from '../core/status.js';
 import { makeTable } from '../utils/table.js';
 import { theme } from '../utils/theme.js';
 import type { ExternalTask, RegisteredPlugin } from '../plugins/index.js';
 import { GitHubClient } from '../integrations/github/github-client.js';
-import { parseGitHubRef } from '../integrations/github/ref.js';
+import { parseGitHubRef, REPO_FORMAT_RE, GITHUB_MARKER_PREFIX } from '../integrations/github/ref.js';
+import { resolveProjectRepo } from '../integrations/github/repo-resolution.js';
 import { importRemoteTasks } from '../integrations/shared/import-tasks.js';
 import { createPluginLogger } from '../plugins/plugin-logger.js';
 import * as logger from '../utils/logger.js';
@@ -34,7 +35,7 @@ function importGitHubIssues(
 ): { created: number; updated: number; skipped: number } {
     const t = theme();
     const defs = ctx.statusRepo.list();
-    const reopenTarget = defs.find(d => d.verb === 'reopen')?.key ?? 'todo';
+    const reopenTarget = reopenTargetKey(defs);
     return importRemoteTasks({
         issues,
         plugin,
@@ -43,7 +44,7 @@ function importGitHubIssues(
         dryRun: pullOpts.dryRun ?? false,
         findExisting: (issue) => ctx.taskRepo.findByGithubRef(issue.externalRef),
         projectName: (issue) => issue.project,
-        projectDescription: (issue) => `GitHub: ${issue.externalRef.split('#')[0]}`,
+        projectDescription: (issue) => `${GITHUB_MARKER_PREFIX}${issue.externalRef.split('#')[0]}`,
         buildInput: (issue, mapped, projectId) => ({
             title: mapped.title || issue.title,
             description: mapped.description,
@@ -89,7 +90,7 @@ function importGitHubIssues(
 /** Count existing local tasks whose status the remote would reconcile (for the --sync-status hint). */
 function countReconcilableGitHub(ctx: AppContext, issues: ExternalTask[]): number {
     const defs = ctx.statusRepo.list();
-    const reopenTarget = defs.find(d => d.verb === 'reopen')?.key ?? 'todo';
+    const reopenTarget = reopenTargetKey(defs);
     let n = 0;
     for (const issue of issues) {
         const existing = ctx.taskRepo.findByGithubRef(issue.externalRef);
@@ -136,7 +137,8 @@ githubCommand
 githubCommand
     .command('pull')
     .description('Pull assigned GitHub issues as local tasks')
-    .option('--repo <owner/repo>', 'Filter by repository')
+    .option('--repo <owner/repo>', 'Filter by repository (owner/repo)')
+    .option('-P, --project <name>', 'Scope by local todo project (not the same as --repo; -P none is not valid here)')
     .option('--label <label>', 'Filter by label')
     .option('--sync-status', 'Reconcile status of already-imported tasks (reopen ones mistakenly marked done)')
     .option('--dry-run', 'Show what would be imported/updated without writing')
@@ -144,8 +146,34 @@ githubCommand
     .action(async (opts) => {
         await runIntegrationCommand('github', { errorPrefix: 'Pull failed' }, async ({ plugin, credStore, ctx }) => {
             const t = theme();
+
+            if (opts.repo && opts.project) {
+                return fail(EXIT.USAGE, 'Cannot use --repo and -P together. Use --repo for a remote repository filter, -P for a local project filter.');
+            }
+            if (opts.project === 'none') {
+                return fail(EXIT.USAGE, '-P none is not valid for "gh pull". Use --repo to filter by remote repository.');
+            }
+
+            // Resolve repo from local project name when -P is given
+            let resolvedRepo: string | undefined = opts.repo;
+            if (opts.project) {
+                const project = ctx.projectRepo.getByName(opts.project);
+                if (!project) {
+                    return fail(EXIT.NOT_FOUND, `Project "${opts.project}" not found. Use "todo projects" to list available projects.`);
+                }
+                const siblings = ctx.taskRepo.listGithubRepos(project.id);
+                const resolved = resolveProjectRepo(siblings, project.description);
+                if ('error' in resolved) {
+                    const hint = resolved.error === 'ambiguous'
+                        ? `multiple repos found (${resolved.candidates.join(', ')}) — pass --repo to disambiguate`
+                        : `no linked siblings and no 'GitHub:' marker on project "${opts.project}" — pass --repo`;
+                    return fail(EXIT.GENERIC, `Cannot resolve repository for project "${opts.project}": ${hint}`);
+                }
+                resolvedRepo = resolved.repo;
+            }
+
             const filters = {
-                project: opts.repo,
+                project: resolvedRepo,
                 label: opts.label,
             };
 
@@ -376,9 +404,10 @@ githubCommand
         const syncStatuses = statusDefs.filter(d => !d.archives).map(d => d.key);
         const allTasks = ctx.taskRepo.list({ status: syncStatuses });
         let pushed = 0;
+        let skippedUnlinked = 0;
 
         for (const task of allTasks) {
-            if (!task.githubRef) continue;
+            if (!task.githubRef) { skippedUnlinked++; continue; }
 
             const result = await plugin.provider.push(credStore, task, task.githubRef, statusDefs);
             if (result.success && result.updatedFields.length > 0) {
@@ -386,8 +415,194 @@ githubCommand
             }
         }
 
+        if (skippedUnlinked > 0) {
+            const t = theme();
+            console.log(t.muted.chalk(
+                `${skippedUnlinked} unlinked task(s) skipped — run "todo gh push -P <project>" to create issues for them.`,
+            ));
+        }
+
         console.log(success(`Sync complete: ${pulled} pulled, ${pushed} pushed`));
     }));
+
+githubCommand
+    .command('push')
+    .description('Push local tasks to GitHub — update linked tasks, optionally create issues for unlinked ones')
+    .option('-P, --project <name>', 'Scope to a local project ("none" for project-less tasks; creation requires --repo when using "none")')
+    .option('--repo <owner/repo>', 'Override/specify repository for new issue creation')
+    .option('--dry-run', 'Preview what would be created or updated without writing')
+    .option('--json', 'Output as JSON')
+    .addHelpText('after', `
+Examples:
+  todo gh push                          Push updates for all linked tasks
+  todo gh push -P myrepo               Create issues + update linked tasks in project "myrepo"
+  todo gh push -P none --repo o/r      Push project-less tasks, creating in o/r
+  todo gh push -P myrepo --dry-run     Preview without writing
+
+Note: Subtasks become independent issues (no parent linkage on GitHub).
+Bare "todo gh push" (no -P and no --repo) only updates already-linked tasks.
+`)
+    .action(async (opts) => {
+        await runIntegrationCommand('github', { errorPrefix: 'Push failed' }, async ({ plugin, credStore, ctx }) => {
+            const t = theme();
+            const statusDefs = ctx.statusRepo.list();
+            const creationScoped = !!(opts.project || opts.repo);
+
+            // Validate --repo format if given
+            if (opts.repo && !REPO_FORMAT_RE.test(opts.repo)) {
+                return fail(EXIT.USAGE, `Invalid --repo format "${opts.repo}". Expected owner/repo (e.g. acme/frontend).`);
+            }
+
+            // Resolve project row when -P is given (but not "none")
+            let scopeProject: import('../core/types.js').Project | null = null;
+            if (opts.project && opts.project !== 'none') {
+                scopeProject = ctx.projectRepo.getByName(opts.project);
+                if (!scopeProject) {
+                    return fail(EXIT.NOT_FOUND, `Project "${opts.project}" not found. Use "todo projects" to list available projects.`);
+                }
+            }
+
+            // Build task scope: non-archived statuses filtered by project
+            const nonArchived = statusDefs.filter(d => !d.archives).map(d => d.key);
+            const taskFilters: import('../core/types.js').TaskFilters = { status: nonArchived };
+            if (opts.project === 'none') {
+                taskFilters.projectName = null;
+            } else if (scopeProject) {
+                taskFilters.projectId = scopeProject.id;
+            }
+
+            const tasks = ctx.taskRepo.list(taskFilters);
+
+            if (tasks.length === 0) {
+                if (!opts.json) console.log(t.muted.chalk('No tasks in scope.'));
+                if (opts.json) emitJson({ ok: true, command: 'gh push', data: { created: [], updated: [], skipped: [], failed: [] } });
+                return;
+            }
+
+            // Per-projectId cache for repo resolution (sentinel key 'null' for project-less tasks)
+            // Cache maps projectId key → resolved repo string or null (unresolvable).
+            const repoCache = new Map<string, string | null>();
+            // Cache maps projectId key → full resolution result for error-kind access.
+            const resolveCache = new Map<string, import('../integrations/github/repo-resolution.js').ResolveRepoResult>();
+
+            const getRepoForTask = (projectId: number | null): string | null => {
+                if (opts.repo) return opts.repo;
+                const key = projectId === null ? 'null' : String(projectId);
+                if (repoCache.has(key)) return repoCache.get(key) ?? null;
+                const project = projectId !== null ? ctx.projectRepo.getById(projectId) : null;
+                const siblings = ctx.taskRepo.listGithubRepos(projectId);
+                const resolved = resolveProjectRepo(siblings, project?.description);
+                resolveCache.set(key, resolved);
+                const repo = 'repo' in resolved ? resolved.repo : null;
+                repoCache.set(key, repo);
+                return repo;
+            };
+
+            const created: Array<{ taskId: number; ref: string }> = [];
+            const updated: number[] = [];
+            const skipped: number[] = [];
+            const failed: Array<{ taskId: number; reason: string }> = [];
+            let hintShown = false;
+
+            for (const task of tasks) {
+                if (task.githubRef) {
+                    // Linked task — push update
+                    if (opts.dryRun) {
+                        if (!opts.json) console.log(`  ${t.muted.chalk('~')} #${task.id} — would update ${task.githubRef}`);
+                        updated.push(task.id);
+                        continue;
+                    }
+                    const result = await plugin.provider.push(credStore, task, task.githubRef, statusDefs);
+                    if (result.success && result.updatedFields.length > 0) {
+                        updated.push(task.id);
+                    } else if (!result.success) {
+                        failed.push({ taskId: task.id, reason: result.message });
+                        logger.logError(`gh push #${task.id}: ${result.message}`);
+                    } else {
+                        skipped.push(task.id);
+                    }
+                    continue;
+                }
+
+                // Unlinked task
+                if (!creationScoped) {
+                    skipped.push(task.id);
+                    if (!hintShown && !opts.json) {
+                        console.log(t.muted.chalk('Unlinked tasks skipped — pass -P <project> or --repo to create issues.'));
+                        hintShown = true;
+                    }
+                    continue;
+                }
+
+                // Skip done/archived
+                if (isComplete(statusDefs, task.status) || isArchived(statusDefs, task.status)) {
+                    skipped.push(task.id);
+                    continue;
+                }
+
+                const repo = getRepoForTask(task.projectId ?? null);
+                if (!repo) {
+                    const projectId = task.projectId ?? null;
+                    const projectName = projectId !== null
+                        ? (ctx.projectRepo.getById(projectId)?.name ?? String(projectId))
+                        : '(no project)';
+                    const key = projectId === null ? 'null' : String(projectId);
+                    const cached = resolveCache.get(key);
+                    let reason: string;
+                    if (cached && 'error' in cached && cached.error === 'ambiguous') {
+                        reason = `ambiguous: multiple repos found (${cached.candidates.join(', ')}) — pass --repo`;
+                    } else {
+                        reason = `no linked siblings and no 'GitHub:' marker on project "${projectName}" — pass --repo`;
+                    }
+                    skipped.push(task.id);
+                    if (!opts.json) logger.logWarn(`#${task.id} skipped: ${reason}`);
+                    continue;
+                }
+
+                if (opts.dryRun) {
+                    if (!opts.json) console.log(`  ${t.muted.chalk('+')} #${task.id} — would create issue in ${repo}`);
+                    created.push({ taskId: task.id, ref: `${repo}#?` });
+                    continue;
+                }
+
+                if (!plugin.provider.createRemote) {
+                    failed.push({ taskId: task.id, reason: 'provider does not support createRemote' });
+                    continue;
+                }
+
+                const result = await plugin.provider.createRemote(credStore, task, { project: repo }, statusDefs);
+                if (result.success && result.externalRef) {
+                    ctx.taskRepo.update(task.id, { githubRef: result.externalRef, lastSyncedAt: new Date().toISOString() });
+                    created.push({ taskId: task.id, ref: result.externalRef });
+                    if (!opts.json) console.log(`  ${t.success.chalk('+')} #${task.id} → ${result.externalRef}`);
+                } else {
+                    failed.push({ taskId: task.id, reason: result.message });
+                    logger.logError(`gh push #${task.id}: ${result.message}`);
+                }
+            }
+
+            if (opts.json) {
+                if (opts.dryRun) {
+                    emitJson({ ok: true, command: 'gh push', data: { dryRun: true, wouldCreate: created, wouldUpdate: updated, wouldSkip: skipped } });
+                } else {
+                    emitJson({ ok: true, command: 'gh push', data: { created, updated, skipped, failed } });
+                    // Partial failure: still exit non-zero so scripts can detect it
+                    if (failed.length > 0) process.exitCode = EXIT.GENERIC;
+                }
+                return;
+            }
+
+            if (opts.dryRun) {
+                console.log(t.muted.chalk(`Would create ${created.length} issues, update ${updated.length}, skip ${skipped.length}`));
+                return;
+            }
+
+            console.log(success(`Created ${created.length} issues, updated ${updated.length}, skipped ${skipped.length}`));
+            if (failed.length > 0) {
+                fail(EXIT.GENERIC, `${failed.length} error(s) — check stderr above for details.`);
+            }
+        })();
+    });
 
 githubCommand
     .command('repos')

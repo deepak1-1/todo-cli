@@ -211,6 +211,40 @@ describe('migration 006 — idempotency (full runMigrations)', () => {
     });
 });
 
+describe('migration 006 — crash-safe self-recording', () => {
+    it('records itself via markApplied inside its own transaction', () => {
+        const pre = buildPre006Db();
+        let recorded = false;
+        up(pre, () => {
+            pre.prepare('INSERT INTO _migrations (name) VALUES (?)').run('006-dynamic-statuses');
+            recorded = true;
+        });
+        expect(recorded).toBe(true);
+        const row = pre.prepare('SELECT name FROM _migrations WHERE name = ?').get('006-dynamic-statuses');
+        expect(row).toBeDefined();
+        pre.close();
+    });
+
+    it('rolls back the schema rebuild if markApplied throws after inserting the row', () => {
+        const pre = buildPre006Db();
+        expect(() => {
+            up(pre, () => {
+                pre.prepare('INSERT INTO _migrations (name) VALUES (?)').run('006-dynamic-statuses');
+                throw new Error('simulated crash after record insert');
+            });
+        }).toThrow(/simulated crash/);
+
+        // The whole transaction — schema rebuild AND the _migrations row — rolled back together.
+        const hasStatuses = pre
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'statuses'")
+            .get();
+        expect(hasStatuses).toBeUndefined();
+        const row = pre.prepare('SELECT name FROM _migrations WHERE name = ?').get('006-dynamic-statuses');
+        expect(row).toBeUndefined();
+        pre.close();
+    });
+});
+
 describe('migration 006 — FK rejects old status values', () => {
     it('inserting "pending" into tasks after migration throws FK violation', () => {
         runMigrations(db);

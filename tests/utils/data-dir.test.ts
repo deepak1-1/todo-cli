@@ -63,6 +63,7 @@ describe('module-load-time constant isolation', () => {
             await store.set('test-provider', 'secret');
             expect(fs.existsSync(path.join(tmpDir, 'credentials.json'))).toBe(true);
             expect(fs.existsSync(path.join(tmpDir, '.salt'))).toBe(true);
+            expect(fs.existsSync(path.join(tmpDir, '.machinekey'))).toBe(true);
         } finally {
             fs.rmSync(tmpDir, { recursive: true, force: true });
         }

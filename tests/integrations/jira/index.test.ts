@@ -234,6 +234,34 @@ describe('jiraProvider.pull', () => {
         expect(tasks[0].description).toBe('ADF text content');
         expect(mockClientInstance.extractAdfText).toHaveBeenCalledOnce();
     });
+
+    it('preserves a Highest-priority issue as urgent through pull then mapToLocal', async () => {
+        const store = makeStore(CREDS);
+        mockClientInstance.search.mockResolvedValue({
+            issues: [{
+                key: 'PROJ-3',
+                id: '10003',
+                fields: {
+                    summary: 'Critical outage',
+                    description: 'Prod is down',
+                    priority: { name: 'Highest' },
+                    status: { name: 'To Do' },
+                    duedate: null,
+                    labels: [],
+                    assignee: null,
+                    project: { key: 'PROJ', name: 'Project Alpha' },
+                },
+            }],
+            total: 1,
+            maxResults: 50,
+        });
+
+        const tasks = await jiraProvider.pull(store, {});
+        expect(tasks[0].priority).toBe('urgent');
+
+        const local = jiraProvider.mapToLocal(tasks[0]);
+        expect(local.priority).toBe('urgent');
+    });
 });
 
 // ──────────────────────────────────────────────
@@ -295,11 +323,14 @@ describe('jiraProvider.push', () => {
         mockClientInstance.getIssue.mockResolvedValue({ key: 'PROJ-1', id: '10001', fields: {} });
         mockClientInstance.getTransitions.mockResolvedValue([]);
 
-        await jiraProvider.push(store, { ...baseTask, priority: 'urgent' }, 'PROJ-1');
+        const result = await jiraProvider.push(store, { ...baseTask, priority: 'urgent' }, 'PROJ-1');
         expect(mockClientInstance.updateIssue).toHaveBeenCalledWith(
             'PROJ-1',
             expect.objectContaining({ priority: { name: 'Highest' } }),
         );
+        // Locks the end-to-end contract: a 204/void-resolving updateIssue still yields success:true.
+        expect(result.success).toBe(true);
+        expect(result.updatedFields).toContain('priority');
     });
 
     it('updates duedate field when task has a dueDate', async () => {
@@ -317,17 +348,34 @@ describe('jiraProvider.push', () => {
 // mapToLocal
 // ──────────────────────────────────────────────
 describe('jiraProvider.mapToLocal', () => {
-    it('maps Jira priority names to local TaskPriority values', () => {
+    it('passes through an already-localized priority unchanged', () => {
         const external: ExternalTask = {
             externalId: '1',
             externalRef: 'PROJ-1',
             externalUrl: '',
             title: 'Issue',
             status: 'In Progress',
-            priority: 'Highest',
+            priority: 'urgent',
         };
         const local = jiraProvider.mapToLocal(external);
         expect(local.priority).toBe('urgent');
+    });
+
+    it('sets priority to undefined for a non-TaskPriority string (e.g. a raw Jira name)', () => {
+        const external: ExternalTask = {
+            externalId: '1', externalRef: 'PROJ-1', externalUrl: '', title: 'X',
+            status: 'Open', priority: 'Highest',
+        };
+        const local = jiraProvider.mapToLocal(external);
+        expect(local.priority).toBeUndefined();
+    });
+
+    it('sets priority to undefined when priority is missing', () => {
+        const external: ExternalTask = {
+            externalId: '1', externalRef: 'PROJ-1', externalUrl: '', title: 'X', status: 'Open',
+        };
+        const local = jiraProvider.mapToLocal(external);
+        expect(local.priority).toBeUndefined();
     });
 
     it('maps Jira "done" status to local "done"', () => {

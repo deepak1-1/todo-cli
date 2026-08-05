@@ -8,6 +8,7 @@ import { theme } from '../utils/theme.js';
 import { success, parseId } from '../utils/format.js';
 import { fail, EXIT, requireEntity } from '../utils/exit.js';
 import { emitJson } from '../utils/json-output.js';
+import { archiveTargetKey } from '../core/status.js';
 import type { Task } from '../core/types.js';
 import type { AppContext } from './context.js';
 
@@ -30,7 +31,7 @@ export function applyDelete(ctx: AppContext, id: number, opts?: { force?: boolea
         // archived parent; record their IDs so undo can re-parent them.
         const promotedChildIds = ctx.taskRepo.promoteChildren(id);
         ctx.taskRepo.archive(id);
-        const archiveKey = ctx.statusRepo.list().find(d => d.archives)?.key ?? 'archived';
+        const archiveKey = archiveTargetKey(ctx.statusRepo.list());
         ctx.actionLog.log({
             taskId: id,
             action: 'archive',
@@ -56,7 +57,7 @@ export const deleteCommand = new Command('rm')
 
         if (opts.done) {
             const archived = ctx.taskRepo.archiveAllDone();
-            const archiveKey = ctx.statusRepo.list().find(d => d.archives)?.key ?? 'archived';
+            const archiveKey = archiveTargetKey(ctx.statusRepo.list());
             for (const { id: archivedId, prevStatus, promotedChildIds } of archived) {
                 ctx.actionLog.log({
                     taskId: archivedId,
@@ -94,7 +95,7 @@ export const deleteCommand = new Command('rm')
             }
         } else {
             if (jsonMode) {
-                const archiveKey = ctx.statusRepo.list().find(d => d.archives)?.key ?? 'archived';
+                const archiveKey = archiveTargetKey(ctx.statusRepo.list());
                 emitJson({ ok: true, command: 'delete', data: { ...deleted, status: archiveKey } });
             } else {
                 console.log(success(`Archived task ${theme().heading.chalk('#' + id)}: ${deleted.title}`));

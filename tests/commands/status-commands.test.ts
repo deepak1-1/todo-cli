@@ -169,3 +169,45 @@ describe('applyEdit — rejects blank title via validateUpdateInput', () => {
         expect(result.task.status).toBe('in_progress');
     });
 });
+
+// ──────────────────────────────────────────────
+// regression: recurring spawn only fires on a genuine non-done -> done transition
+// ──────────────────────────────────────────────
+describe('applyEdit — recurring spawn guards against re-completion duplicates', () => {
+    it('does not spawn a second occurrence when re-completing an already-done recurring task', () => {
+        const task = ctx.taskRepo.create({ title: 'Recurring', recurrence: 'daily' });
+        const r1 = applyEdit(ctx, task.id, { status: 'done' });
+        expect(r1.recurring).toBeDefined();
+        const countAfterFirst = ctx.taskRepo.list({}).length;
+        const r2 = applyEdit(ctx, task.id, { status: 'done' });
+        expect(r2.recurring).toBeUndefined();
+        expect(ctx.taskRepo.list({}).length).toBe(countAfterFirst);
+    });
+
+    it('spawns again after reopening and re-completing a recurring task', () => {
+        const task = ctx.taskRepo.create({ title: 'Recurring', recurrence: 'daily' });
+        const r1 = applyEdit(ctx, task.id, { status: 'done' });
+        expect(r1.recurring).toBeDefined();
+        applyEdit(ctx, task.id, { status: 'todo' });
+        const r2 = applyEdit(ctx, task.id, { status: 'done' });
+        expect(r2.recurring).toBeDefined();
+        expect(r2.recurring?.id).not.toBe(r1.recurring?.id);
+    });
+
+    it('does not spawn when moving between two completing statuses', () => {
+        ctx.statusRepo.create({ key: 'verified', label: 'Verified', verb: 'verify', completes: true });
+        const task = ctx.taskRepo.create({ title: 'Recurring', recurrence: 'daily' });
+        const r1 = applyEdit(ctx, task.id, { status: 'done' });
+        expect(r1.recurring).toBeDefined();
+        const r2 = applyEdit(ctx, task.id, { status: 'verified' });
+        expect(r2.recurring).toBeUndefined();
+    });
+
+    it('does not spawn when archiving an already-done recurring task', () => {
+        const task = ctx.taskRepo.create({ title: 'Recurring', recurrence: 'daily' });
+        const r1 = applyEdit(ctx, task.id, { status: 'done' });
+        expect(r1.recurring).toBeDefined();
+        const r2 = applyEdit(ctx, task.id, { status: 'archived' });
+        expect(r2.recurring).toBeUndefined();
+    });
+});

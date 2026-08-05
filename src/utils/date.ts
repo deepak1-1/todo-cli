@@ -3,7 +3,14 @@
 // ============================================================
 
 import * as chrono from 'chrono-node';
-import { format, formatDistanceToNow, isToday, isTomorrow, isPast, isThisWeek, subDays, subMonths, subYears } from 'date-fns';
+import { format, formatDistanceToNow, isToday, isTomorrow, isPast, isThisWeek, subDays, subMonths, subYears, parseISO } from 'date-fns';
+
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Parse a date string for display/comparison: date-only strings ("YYYY-MM-DD") as local midnight, everything else as an instant. */
+export function parseDisplayDate(dateStr: string): Date {
+    return DATE_ONLY_RE.test(dateStr) ? parseISO(dateStr) : new Date(dateStr);
+}
 
 /** Parse a natural language date string into an ISO date string (YYYY-MM-DD) */
 export function parseDate(input: string): string | null {
@@ -28,7 +35,7 @@ export function parseDate(input: string): string | null {
 export function formatDateDisplay(dateStr: string | null): string {
     if (!dateStr) return '';
 
-    const date = new Date(dateStr);
+    const date = parseDisplayDate(dateStr);
     if (isNaN(date.getTime())) return dateStr;
 
     if (isToday(date)) return 'Today';
@@ -61,7 +68,7 @@ export function formatLocalDateTime(stored: string | null | undefined): string {
 /** Get a relative description like "3 days from now" or "2 days ago" */
 export function formatRelative(dateStr: string | null): string {
     if (!dateStr) return '';
-    const date = new Date(dateStr);
+    const date = parseDisplayDate(dateStr);
     if (isNaN(date.getTime())) return '';
     return formatDistanceToNow(date, { addSuffix: true });
 }
@@ -69,20 +76,20 @@ export function formatRelative(dateStr: string | null): string {
 /** Check if a date string is overdue (before today and not null) */
 export function isOverdue(dateStr: string | null): boolean {
     if (!dateStr) return false;
-    const date = new Date(dateStr);
+    const date = parseDisplayDate(dateStr);
     return isPast(date) && !isToday(date);
 }
 
 /** Check if a date string is due this week */
 export function isDueThisWeek(dateStr: string | null): boolean {
     if (!dateStr) return false;
-    return isThisWeek(new Date(dateStr));
+    return isThisWeek(parseDisplayDate(dateStr));
 }
 
 /** Check if a date string is due today */
 export function isDueToday(dateStr: string | null): boolean {
     if (!dateStr) return false;
-    return isToday(new Date(dateStr));
+    return isToday(parseDisplayDate(dateStr));
 }
 
 // ============================================================

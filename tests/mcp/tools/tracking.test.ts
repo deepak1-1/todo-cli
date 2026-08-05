@@ -382,6 +382,29 @@ describe('todo_log_time', () => {
         expect(getText(result)).toMatch(/not found/i);
     });
 
+    it('regression: "1.5m" logs 90s, not truncated to 60s', async () => {
+        const task = ctx.taskRepo.create({ title: 'Decimal minutes', priority: 'medium' });
+        await loadTools();
+
+        const result = server.call('todo_log_time', { id: task.id, duration: '1.5m' }) as Record<string, unknown>;
+
+        expect(result).not.toHaveProperty('isError');
+        const session = result.structuredContent as Record<string, unknown>;
+        expect(session.duration).toBe(90);
+        expect(ctx.taskRepo.getById(task.id)?.timeSpent).toBe(90);
+    });
+
+    it('regression: "1d" is rejected, not silently parsed as 60s', async () => {
+        const task = ctx.taskRepo.create({ title: 'Day suffix', priority: 'low' });
+        await loadTools();
+
+        const result = server.call('todo_log_time', { id: task.id, duration: '1d' }) as Record<string, unknown>;
+
+        expect(result).toHaveProperty('isError', true);
+        expect(getText(result)).toMatch(/invalid duration/i);
+        expect(ctx.taskRepo.getById(task.id)?.timeSpent).toBe(0);
+    });
+
     it('stores the optional note on the session', async () => {
         const task = ctx.taskRepo.create({ title: 'Noted log', priority: 'medium' });
         await loadTools();
@@ -595,6 +618,33 @@ describe('todo_reduce_session', () => {
         const result = server.call('todo_reduce_session', { sessionId, duration: '0m' }) as Record<string, unknown>;
 
         expect(result).toHaveProperty('isError', true);
+    });
+
+    it('regression: "0.5m" reduces by 30s, not truncated to 0s', async () => {
+        const task = ctx.taskRepo.create({ title: 'Decimal reduce', priority: 'medium' });
+        const sessionId = insertTrackingSession(db, task.id, secondsAgoUtc(1000), secondsAgoUtc(400), 600);
+        db.prepare('UPDATE tasks SET time_spent = 600 WHERE id = ?').run(task.id);
+        await loadTools();
+
+        const result = server.call('todo_reduce_session', { sessionId, duration: '0.5m' }) as Record<string, unknown>;
+
+        expect(result).not.toHaveProperty('isError');
+        const updated = result.structuredContent as Record<string, unknown>;
+        expect(updated.duration).toBe(570); // 600 - 30
+        expect(ctx.taskRepo.getById(task.id)?.timeSpent).toBe(570);
+    });
+
+    it('regression: "1d" is rejected, not silently parsed as 60s', async () => {
+        const task = ctx.taskRepo.create({ title: 'Day suffix reduce', priority: 'low' });
+        const sessionId = insertTrackingSession(db, task.id, secondsAgoUtc(1000), secondsAgoUtc(400), 600);
+        db.prepare('UPDATE tasks SET time_spent = 600 WHERE id = ?').run(task.id);
+        await loadTools();
+
+        const result = server.call('todo_reduce_session', { sessionId, duration: '1d' }) as Record<string, unknown>;
+
+        expect(result).toHaveProperty('isError', true);
+        expect(getText(result)).toMatch(/invalid duration/i);
+        expect(ctx.taskRepo.getById(task.id)?.timeSpent).toBe(600);
     });
 });
 

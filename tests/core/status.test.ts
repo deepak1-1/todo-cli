@@ -9,6 +9,8 @@ import {
     validStatusKeys,
     resolveStatusOrThrow,
     reconcilePulledStatus,
+    archiveTargetKey,
+    reopenTargetKey,
 } from '../../src/core/status.js';
 import type { StatusDef } from '../../src/core/status.js';
 
@@ -313,5 +315,48 @@ describe('reconcilePulledStatus', () => {
 
     it('remote terminal + local in_progress → null (no auto-complete on pull)', () => {
         expect(reconcilePulledStatus(DEFS, 'in_progress', { isTerminal: true }, 'todo')).toBeNull();
+    });
+});
+
+describe('archiveTargetKey', () => {
+    it('returns the first archiving status key', () => {
+        expect(archiveTargetKey(DEFS)).toBe('archived');
+    });
+
+    it('falls back to "archived" when no status has archives=true', () => {
+        const noArchiving = DEFS.filter(d => !d.archives);
+        expect(archiveTargetKey(noArchiving)).toBe('archived');
+    });
+
+    it('falls back to "archived" for empty defs', () => {
+        expect(archiveTargetKey([])).toBe('archived');
+    });
+
+    it('picks the first archiving status by array/sort order when multiple exist', () => {
+        const multi: StatusDef[] = [
+            ...DEFS,
+            { key: 'trashed', label: 'Trashed', icon: '🗑', color: 'red', sortOrder: 7, verb: 'trash', completes: false, archives: true, isBuiltin: false },
+        ];
+        expect(archiveTargetKey(multi)).toBe('archived');
+    });
+});
+
+describe('reopenTargetKey', () => {
+    it('returns the status key whose verb is reopen', () => {
+        expect(reopenTargetKey(DEFS)).toBe('todo');
+    });
+
+    it('falls back to "todo" when no status has verb=reopen', () => {
+        const noReopen = DEFS.filter(d => d.verb !== 'reopen');
+        expect(reopenTargetKey(noReopen)).toBe('todo');
+    });
+
+    it('falls back to "todo" for empty defs', () => {
+        expect(reopenTargetKey([])).toBe('todo');
+    });
+
+    it('honors a custom/renamed reopen status key', () => {
+        const custom: StatusDef[] = DEFS.map(d => (d.verb === 'reopen' ? { ...d, key: 'backlog' } : d));
+        expect(reopenTargetKey(custom)).toBe('backlog');
     });
 });

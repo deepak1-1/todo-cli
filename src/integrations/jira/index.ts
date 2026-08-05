@@ -14,6 +14,7 @@ import {
     PluginCommand,
 } from '../../plugins/types.js';
 import { createPluginLogger } from '../../plugins/plugin-logger.js';
+import { toLocalPriority } from '../shared/priority.js';
 import { JiraClient } from './jira-client.js';
 
 const JIRA_DOMAIN_KEY = 'jira:domain';
@@ -282,7 +283,7 @@ const jiraProvider: IntegrationProvider = {
         return {
             title: external.title,
             description: external.description,
-            priority: mapJiraPriority(external.priority),
+            priority: toLocalPriority(external.priority),
             status: mapJiraStatus(external.status),
             dueDate: external.dueDate,
         };

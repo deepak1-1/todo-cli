@@ -51,9 +51,13 @@ export function importRemoteTasks(opts: ImportRemoteTasksOptions): { created: nu
         const cached = projectCache.get(name);
         if (cached !== undefined) return cached;
         const description = opts.projectDescription?.(issue);
-        const id = opts.projectRepo.getOrCreate(name, description ? { description } : undefined).id;
-        projectCache.set(name, id);
-        return id;
+        const project = opts.projectRepo.getOrCreate(name, description ? { description } : undefined);
+        // Upsert marker only when description is absent — never overwrite user-written content.
+        if (description && !project.description?.trim()) {
+            opts.projectRepo.update(project.id, { description });
+        }
+        projectCache.set(name, project.id);
+        return project.id;
     };
 
     const importOne = (issue: ExternalTask): void => {

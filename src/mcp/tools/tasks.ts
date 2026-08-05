@@ -9,7 +9,7 @@ import { getContext } from '../../commands/context.js';
 import { normalizePriority, TASK_PRIORITIES, VALID_RECURRENCES } from '../../core/types.js';
 import { findByKeyOrVerb, validStatusKeys } from '../../core/status.js';
 import { parseDate } from '../../utils/date.js';
-import { fuzzySearch } from '../../core/filter.js';
+import { searchAndLimit } from '../../core/filter.js';
 import type { TaskFilters, TaskSort, EditOptions } from '../../core/types.js';
 import { ok, err } from './shared.js';
 
@@ -241,8 +241,9 @@ export function registerTaskTools(server: McpServer, opts: { allowDelete: boolea
                     ? { field: args.sortField, direction: args.sortDirection ?? 'asc' }
                     : undefined;
 
-                let tasks = ctx.taskRepo.list(filters, sort, args.limit ?? 100);
-                if (args.search) tasks = fuzzySearch(tasks, args.search as string);
+                const searching = !!args.search;
+                let tasks = ctx.taskRepo.list(filters, sort, searching ? undefined : (args.limit ?? 100));
+                if (searching) tasks = searchAndLimit(tasks, args.search as string, args.limit ?? 100);
                 return ok(tasks, `Found ${tasks.length} task(s)`);
             } catch (e: unknown) {
                 return err(e instanceof Error ? e.message : String(e));

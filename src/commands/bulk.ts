@@ -3,11 +3,11 @@ import { Command } from 'commander';
 import { theme } from '../utils/theme.js';
 import * as readline from 'node:readline';
 import { getContext } from './context.js';
-import { executeEdit } from './edit.js';
+import { applyEdit } from './edit.js';
 import { applyDelete } from './delete.js';
-import { formatTaskTable, success } from '../utils/format.js';
+import { formatTaskTable, success, error } from '../utils/format.js';
 import { addFilterOptions, filterAndSearchTasks, hasAnyFilter } from './filter-options.js';
-import { fail, EXIT } from '../utils/exit.js';
+import { fail, EXIT, type ExitCode } from '../utils/exit.js';
 import { emitJson } from '../utils/json-output.js';
 import { normalizePriority, PRIORITY_ERROR } from '../core/types.js';
 import type { Task, EditOptions } from '../core/types.js';
@@ -56,6 +56,47 @@ async function previewAndConfirm(tasks: Task[], actionLabel: string, yes: boolea
     return confirm('  Continue?');
 }
 
+interface BulkFailure {
+    taskId: number;
+    reason: string;
+}
+
+/** Runs a per-task mutation across tasks, accounting successes/failures so ok/exitCode never contradict the count. */
+function runBulk(
+    tasks: Task[],
+    apply: (task: Task) => void,
+    opts: { command: string; json: boolean; successVerb: string; failCode: ExitCode },
+): void {
+    const succeeded: number[] = [];
+    const failed: BulkFailure[] = [];
+
+    for (const task of tasks) {
+        try {
+            apply(task);
+            succeeded.push(task.id);
+        } catch (e: unknown) {
+            failed.push({ taskId: task.id, reason: e instanceof Error ? e.message : String(e) });
+        }
+    }
+
+    if (opts.json) {
+        emitJson({
+            ok: failed.length === 0,
+            command: opts.command,
+            data: { updated: succeeded.length, failed: failed.length, taskIds: succeeded, errors: failed },
+        });
+    } else {
+        if (succeeded.length > 0) {
+            console.log(success(`${succeeded.length} task${succeeded.length !== 1 ? 's' : ''} ${opts.successVerb}`));
+        }
+        for (const f of failed) {
+            console.error(error(`Task #${f.taskId}: ${f.reason}`));
+        }
+    }
+
+    if (failed.length > 0) process.exitCode = opts.failCode;
+}
+
 function makeStatusAction(targetStatusKey: string, label: string, command: string) {
     return async (opts: Record<string, unknown>) => {
         const json = !!opts.json;
@@ -63,15 +104,13 @@ function makeStatusAction(targetStatusKey: string, label: string, command: strin
         if (!tasks) return;
         if (!json && !(await previewAndConfirm(tasks, `marked as ${label}`, !!opts.yes))) return;
 
-        let count = 0;
-        const taskIds: number[] = [];
-        for (const task of tasks) {
-            executeEdit(task.id, { status: targetStatusKey }, { silent: true });
-            count++;
-            taskIds.push(task.id);
-        }
-        if (json) emitJson({ ok: true, command, data: { updated: count, taskIds, status: targetStatusKey } });
-        else console.log(success(`${count} task${count !== 1 ? 's' : ''} marked as ${label}`));
+        const ctx = getContext();
+        runBulk(tasks, (task) => { applyEdit(ctx, task.id, { status: targetStatusKey }); }, {
+            command,
+            json,
+            successVerb: `marked as ${label}`,
+            failCode: EXIT.INVALID_TRANSITION,
+        });
     };
 }
 
@@ -109,14 +148,13 @@ addSharedOptions(deleteCmd)
         if (!json && !(await previewAndConfirm(tasks, actionLabel, !!opts.yes))) return;
 
         const ctx = getContext();
-        const taskIds: number[] = [];
         // Reuse applyDelete so bulk shares the same promote-children + action-log path as `rm`.
-        for (const task of tasks) {
-            applyDelete(ctx, task.id, { force: opts.force });
-            taskIds.push(task.id);
-        }
-        if (json) emitJson({ ok: true, command: 'bulk delete', data: { updated: tasks.length, taskIds, action: actionLabel } });
-        else console.log(success(`${tasks.length} task${tasks.length !== 1 ? 's' : ''} ${actionLabel}`));
+        runBulk(tasks, (task) => { applyDelete(ctx, task.id, { force: opts.force }); }, {
+            command: 'bulk delete',
+            json,
+            successVerb: actionLabel,
+            failCode: EXIT.GENERIC,
+        });
     });
 
 const editCmd = new Command('edit').description('Edit fields on matching tasks');
@@ -162,13 +200,13 @@ Examples:
 
         if (!json && !(await previewAndConfirm(tasks, `updated (${fields.join(', ')})`, !!opts.yes))) return;
 
-        const taskIds: number[] = [];
-        for (const task of tasks) {
-            executeEdit(task.id, editOpts, { silent: true });
-            taskIds.push(task.id);
-        }
-        if (json) emitJson({ ok: true, command: 'bulk edit', data: { updated: tasks.length, taskIds, fields } });
-        else console.log(success(`${tasks.length} task${tasks.length !== 1 ? 's' : ''} updated`));
+        const ctx = getContext();
+        runBulk(tasks, (task) => { applyEdit(ctx, task.id, editOpts); }, {
+            command: 'bulk edit',
+            json,
+            successVerb: 'updated',
+            failCode: EXIT.INVALID_TRANSITION,
+        });
     });
 
 const tagAddCmd = new Command('add')
@@ -181,14 +219,15 @@ addSharedOptions(tagAddCmd).action(async (tagname: string, opts) => {
     if (!json && !(await previewAndConfirm(tasks, `tagged with "${tagname}"`, !!opts.yes))) return;
 
     const ctx = getContext();
-    const taskIds: number[] = [];
-    for (const task of tasks) {
+    runBulk(tasks, (task) => {
         ctx.tagRepo.addTaskTags(task.id, [tagname]);
         ctx.actionLog.log({ taskId: task.id, action: 'tag_add', entityType: 'task', prevState: null, newState: JSON.stringify({ tag: tagname }) });
-        taskIds.push(task.id);
-    }
-    if (json) emitJson({ ok: true, command: 'bulk tag add', data: { updated: tasks.length, taskIds, tag: tagname } });
-    else console.log(success(`Added tag "${tagname}" to ${tasks.length} task${tasks.length !== 1 ? 's' : ''}`));
+    }, {
+        command: 'bulk tag add',
+        json,
+        successVerb: `tagged with "${tagname}"`,
+        failCode: EXIT.GENERIC,
+    });
 });
 
 const tagRemoveCmd = new Command('remove')
@@ -201,14 +240,15 @@ addSharedOptions(tagRemoveCmd).action(async (tagname: string, opts) => {
     if (!json && !(await previewAndConfirm(tasks, `untagged from "${tagname}"`, !!opts.yes))) return;
 
     const ctx = getContext();
-    const taskIds: number[] = [];
-    for (const task of tasks) {
+    runBulk(tasks, (task) => {
         ctx.tagRepo.removeTaskTags(task.id, [tagname]);
         ctx.actionLog.log({ taskId: task.id, action: 'tag_remove', entityType: 'task', prevState: JSON.stringify({ tag: tagname }), newState: null });
-        taskIds.push(task.id);
-    }
-    if (json) emitJson({ ok: true, command: 'bulk tag remove', data: { updated: tasks.length, taskIds, tag: tagname } });
-    else console.log(success(`Removed tag "${tagname}" from ${tasks.length} task${tasks.length !== 1 ? 's' : ''}`));
+    }, {
+        command: 'bulk tag remove',
+        json,
+        successVerb: `untagged from "${tagname}"`,
+        failCode: EXIT.GENERIC,
+    });
 });
 
 const tagCmd = new Command('tag').description('Bulk tag operations');

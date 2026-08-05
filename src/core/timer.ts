@@ -2,28 +2,39 @@
 // Time formatting and parsing — pure, no I/O
 // ============================================================
 
+// Whole-string match: one or more <number><unit> components (h/m/s), e.g. "1h 30m", "1.5h"
+const DURATION_COMPONENTS = /^\s*(?:\d+(?:\.\d+)?\s*[hms]\s*)+$/i;
+// Extracts each <number><unit> component for summation
+const DURATION_COMPONENT = /(\d+(?:\.\d+)?)\s*([hms])/gi;
+// Whole-string bare number, e.g. "90", "1.5"
+const DURATION_BARE_NUMBER = /^\s*\d+(?:\.\d+)?\s*$/;
+
 /**
  * Parse a human-readable duration string into seconds.
- * Supports: 2h, 30m, 45s, 1h30m, 1.5h, 90 (bare number = minutes).
- * Returns 0 for unrecognised input — callers must guard `<= 0`.
+ * Supports: 2h, 30m, 45s, 1h30m, 1.5h, 1h 30m, 90 (bare number = minutes).
+ * Returns NaN for unrecognised input; callers must guard isNaN and <= 0.
  */
 export function parseDuration(input: string): number {
-    let total = 0;
-    const hourMatch = input.match(/(\d+(?:\.\d+)?)\s*h/i);
-    const minMatch = input.match(/(\d+)\s*m/i);
-    const secMatch = input.match(/(\d+)\s*s/i);
+    const trimmed = input.trim();
 
-    if (hourMatch) total += parseFloat(hourMatch[1]) * 3600;
-    if (minMatch) total += parseInt(minMatch[1]) * 60;
-    if (secMatch) total += parseInt(secMatch[1]);
-
-    // Bare number → treat as minutes
-    if (!hourMatch && !minMatch && !secMatch) {
-        const num = parseFloat(input);
-        if (!isNaN(num)) total = num * 60;
+    if (DURATION_COMPONENTS.test(trimmed)) {
+        let total = 0;
+        for (const match of trimmed.matchAll(DURATION_COMPONENT)) {
+            const value = parseFloat(match[1]);
+            const unit = match[2].toLowerCase();
+            if (unit === 'h') total += value * 3600;
+            else if (unit === 'm') total += value * 60;
+            else total += value;
+        }
+        return Math.round(total);
     }
 
-    return Math.round(total);
+    // Bare number → treat as minutes
+    if (DURATION_BARE_NUMBER.test(trimmed)) {
+        return Math.round(parseFloat(trimmed) * 60);
+    }
+
+    return NaN;
 }
 
 /** Format seconds into human-readable duration like "1h 25m" */

@@ -22,3 +22,13 @@ export function fuzzySearch(tasks: TaskWithRelations[], query: string): SearchRe
         return matched;
     }, []);
 }
+
+/** Fuzzy-search then cap results to limit — apply the cap to matches, never to the pre-search fetch */
+export function searchAndLimit(
+    tasks: TaskWithRelations[],
+    query: string,
+    limit?: number,
+): SearchResult[] {
+    const matched = fuzzySearch(tasks, query);
+    return limit !== undefined ? matched.slice(0, limit) : matched;
+}

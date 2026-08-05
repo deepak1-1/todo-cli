@@ -40,6 +40,7 @@ let mockClientInstance: {
     getUser: ReturnType<typeof vi.fn>;
     getAssignedIssues: ReturnType<typeof vi.fn>;
     updateIssue: ReturnType<typeof vi.fn>;
+    createIssue: ReturnType<typeof vi.fn>;
 };
 
 beforeEach(() => {
@@ -48,6 +49,7 @@ beforeEach(() => {
         getUser: vi.fn().mockResolvedValue({ login: 'alice', id: 1, name: 'Alice', email: 'a@x.com' }),
         getAssignedIssues: vi.fn().mockResolvedValue([]),
         updateIssue: vi.fn().mockResolvedValue(undefined),
+        createIssue: vi.fn().mockResolvedValue({ number: 42, html_url: 'https://github.com/acme/frontend/issues/42' }),
     };
     MockGitHubClient.mockImplementation(() => mockClientInstance as never);
 });
@@ -239,13 +241,25 @@ describe('githubProvider.push', () => {
         expect((labelCall![3] as Record<string, unknown>).labels).toContain('priority: critical');
     });
 
-    it('returns success:false with message when updateIssue throws', async () => {
+    it('returns success:false with message when state updateIssue throws', async () => {
         const store = makeStore();
         mockClientInstance.updateIssue.mockRejectedValue(new Error('gh command failed'));
         const result = await githubProvider.push(store, baseTask, 'acme/repo#5');
         expect(result.success).toBe(false);
         expect(result.message).toContain('gh command failed');
         expect(result.updatedFields).toEqual([]);
+    });
+
+    it('still succeeds when label updateIssue throws (best-effort for labels)', async () => {
+        const store = makeStore();
+        // First call (state) succeeds, second call (labels) fails
+        mockClientInstance.updateIssue
+            .mockResolvedValueOnce(undefined)
+            .mockRejectedValueOnce(new Error('label not found'));
+        const result = await githubProvider.push(store, { ...baseTask, priority: 'urgent' }, 'acme/repo#5');
+        expect(result.success).toBe(true);
+        expect(result.updatedFields).toContain('state');
+        expect(result.updatedFields).not.toContain('labels');
     });
 
     it('returns success:false for an invalid externalRef format', async () => {
@@ -285,6 +299,108 @@ describe('githubProvider.mapToLocal', () => {
         };
         const local = githubProvider.mapToLocal(external);
         expect(local.priority).toBeUndefined();
+    });
+});
+
+// ──────────────────────────────────────────────
+// createRemote
+// ──────────────────────────────────────────────
+describe('githubProvider.createRemote', () => {
+    const baseTask: Task = {
+        id: 7,
+        title: 'New feature',
+        description: 'Detailed description',
+        status: 'todo',
+        priority: 'high',
+        projectId: null,
+        dueDate: null,
+        recurrence: null,
+        timeSpent: 0,
+        jiraKey: null,
+        jiraId: null,
+        githubRef: null,
+        syncHash: null,
+        lastSyncedAt: null,
+        createdAt: '2026-01-01 00:00:00',
+        updatedAt: '2026-01-01 00:00:00',
+        completedAt: null,
+        archivedAt: null,
+    };
+
+    it('creates an issue and returns success with correct externalRef', async () => {
+        const store = makeStore();
+        const result = await githubProvider.createRemote!(store, baseTask, { project: 'acme/frontend' });
+        expect(result.success).toBe(true);
+        expect(result.externalRef).toBe('acme/frontend#42');
+        expect(mockClientInstance.createIssue).toHaveBeenCalledWith('acme', 'frontend', expect.objectContaining({ title: 'New feature' }));
+    });
+
+    it('returns failure for invalid owner/repo format', async () => {
+        const store = makeStore();
+        const result = await githubProvider.createRemote!(store, baseTask, { project: 'not-valid' });
+        expect(result.success).toBe(false);
+        expect(result.message).toContain('Invalid repo format');
+        expect(mockClientInstance.createIssue).not.toHaveBeenCalled();
+    });
+
+    it('returns failure for done task without calling createIssue', async () => {
+        const store = makeStore();
+        const result = await githubProvider.createRemote!(store, { ...baseTask, status: 'done' }, { project: 'acme/frontend' });
+        expect(result.success).toBe(false);
+        expect(result.message).toContain('done/archived');
+        expect(mockClientInstance.createIssue).not.toHaveBeenCalled();
+    });
+
+    it('returns failure for archived task without calling createIssue', async () => {
+        const store = makeStore();
+        const result = await githubProvider.createRemote!(store, { ...baseTask, status: 'archived' }, { project: 'acme/frontend' });
+        expect(result.success).toBe(false);
+        expect(result.message).toContain('done/archived');
+        expect(mockClientInstance.createIssue).not.toHaveBeenCalled();
+    });
+
+    it('body contains only marker when task has no description (no leading ---)', async () => {
+        const store = makeStore();
+        await githubProvider.createRemote!(store, { ...baseTask, description: '' }, { project: 'acme/frontend' });
+        const callArgs = mockClientInstance.createIssue.mock.calls[0];
+        const body: string = callArgs[2].body;
+        expect(body).not.toContain('---');
+        expect(body).toBe('Created from todo-cli task #7');
+    });
+
+    it('still succeeds when priority label application fails (best-effort)', async () => {
+        const store = makeStore();
+        mockClientInstance.updateIssue.mockRejectedValue(new Error('label not found'));
+        const result = await githubProvider.createRemote!(store, baseTask, { project: 'acme/frontend' });
+        expect(result.success).toBe(true);
+        expect(result.externalRef).toBe('acme/frontend#42');
+    });
+
+    it('includes the task description and task-id marker in the issue body', async () => {
+        const store = makeStore();
+        await githubProvider.createRemote!(store, baseTask, { project: 'acme/frontend' });
+        const callArgs = mockClientInstance.createIssue.mock.calls[0];
+        const body: string = callArgs[2].body;
+        expect(body).toContain('Detailed description');
+        expect(body).toContain('Created from todo-cli task #7');
+    });
+
+    it('passes special characters (quotes, newlines, backticks) verbatim to createIssue', async () => {
+        const store = makeStore();
+        const specialTitle = 'Fix "the $thing" with `backticks` and\nnewlines';
+        await githubProvider.createRemote!(store, { ...baseTask, title: specialTitle }, { project: 'acme/frontend' });
+        expect(mockClientInstance.createIssue).toHaveBeenCalledWith(
+            'acme', 'frontend',
+            expect.objectContaining({ title: specialTitle }),
+        );
+    });
+
+    it('returns failure when createIssue throws', async () => {
+        const store = makeStore();
+        mockClientInstance.createIssue.mockRejectedValue(new Error('gh error'));
+        const result = await githubProvider.createRemote!(store, baseTask, { project: 'acme/frontend' });
+        expect(result.success).toBe(false);
+        expect(result.message).toContain('gh error');
     });
 });
 

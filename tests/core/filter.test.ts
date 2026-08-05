@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fuzzySearch } from '../../src/core/filter.js';
+import { fuzzySearch, searchAndLimit } from '../../src/core/filter.js';
 import type { TaskWithRelations, SearchResult } from '../../src/core/types.js';
 
 function makeMockTask(overrides: Partial<TaskWithRelations> = {}): TaskWithRelations {
@@ -135,5 +135,41 @@ describe('fuzzySearch', () => {
         const result: SearchResult[] = fuzzySearch(tasks, 'Documentation');
         const match = result.find(r => r.id === 4)!;
         expect(match._matchedIn).toContain('project');
+    });
+});
+
+describe('searchAndLimit', () => {
+    it('should return all matches when limit is undefined', () => {
+        const result = searchAndLimit(tasks, 'a', undefined);
+        expect(result).toEqual(fuzzySearch(tasks, 'a'));
+    });
+
+    it('should slice matches down to limit', () => {
+        const result = searchAndLimit(tasks, 'a', 2);
+        expect(result).toHaveLength(2);
+    });
+
+    it('should return all matches when limit exceeds match count', () => {
+        const result = searchAndLimit(tasks, 'Frontend', 100);
+        expect(result).toHaveLength(1);
+    });
+
+    it('should preserve input order before slicing (sort-then-limit semantics)', () => {
+        const ordered = [tasks[2], tasks[0], tasks[4]];
+        const result = searchAndLimit(ordered, 'a', 2);
+        expect(result.map(r => r.id)).toEqual([ordered[0].id, ordered[1].id]);
+    });
+
+    it('should apply the cap to matches, not to the pre-filter candidate count', () => {
+        const many = Array.from({ length: 120 }, (_, i) => makeMockTask({ id: 1000 + i, title: `Filler ${i}` }));
+        const withMatch = [...many, makeMockTask({ id: 9999, title: 'Pay invoice ACME' })];
+        const result = searchAndLimit(withMatch, 'invoice', 100);
+        expect(result).toHaveLength(1);
+        expect(result[0].id).toBe(9999);
+    });
+
+    it('should behave like fuzzySearch for empty query regardless of limit', () => {
+        const result = searchAndLimit(tasks, '', 2);
+        expect(result).toHaveLength(2);
     });
 });

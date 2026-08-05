@@ -16,6 +16,19 @@ import type { AppContext } from '../../src/commands/context.js';
 let db: Database.Database;
 let ctx: AppContext;
 
+// Captures a single JSON line written to stdout during fn(), preserving process.exitCode for assertions.
+async function captureJsonOutput(fn: () => Promise<void>): Promise<{ payload: Record<string, unknown>; exitCode: number | undefined }> {
+    let captured = '';
+    const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => { captured += chunk; return true; });
+    process.exitCode = undefined;
+    try {
+        await fn();
+    } finally {
+        writeSpy.mockRestore();
+    }
+    return { payload: JSON.parse(captured.trim()) as Record<string, unknown>, exitCode: process.exitCode };
+}
+
 function buildCtx(database: Database.Database): AppContext {
     return {
         taskRepo: new TaskRepository(database),
@@ -60,6 +73,8 @@ beforeEach(() => {
 afterEach(() => {
     db.close();
     vi.restoreAllMocks();
+    // Avoid exit-code leakage between tests since bulk actions set process.exitCode directly
+    process.exitCode = undefined;
 });
 
 // ──────────────────────────────────────────────
@@ -361,5 +376,177 @@ describe('bulk delete — subtask promotion on archive', () => {
         // Single-task path promotes correctly
         expect(ctx.taskRepo.getById(parent.id)?.status).toBe('archived');
         expect(ctx.taskRepo.getById(child.id)?.parentId).toBeNull(); // correctly promoted
+    });
+});
+
+// ──────────────────────────────────────────────
+// Regression: bulk verbs must not report false success when per-task edits fail
+// (TITLE: bulk-false-success — ok:true/full count reported while every edit throws)
+// ──────────────────────────────────────────────
+describe('bulk false-success regression', () => {
+    it('bulk edit --set-due <garbage> --json reports ok:false, updated:0, failed:N, nonzero exit', async () => {
+        ctx.taskRepo.create({ title: 'Task A', priority: 'medium' });
+        ctx.taskRepo.create({ title: 'Task B', priority: 'medium' });
+
+        const bulkCommand = await loadBulkCommand();
+        const { payload, exitCode } = await captureJsonOutput(async () => {
+            await bulkCommand.parseAsync(
+                ['edit', '--priority', 'medium', '--set-due', 'garbagedate', '--json', '--yes'],
+                { from: 'user' },
+            );
+        });
+
+        expect(payload.ok).toBe(false);
+        expect(exitCode).toBe(4); // EXIT.INVALID_TRANSITION
+        const data = payload.data as Record<string, unknown>;
+        expect(data.updated).toBe(0);
+        expect(data.failed).toBe(2);
+        expect((data.errors as unknown[]).length).toBe(2);
+
+        // No task's dueDate actually changed
+        const tasks = ctx.taskRepo.list({});
+        expect(tasks.every(t => t.dueDate === null)).toBe(true);
+    });
+
+    it('bulk edit --set-due <valid> --json still reports ok:true/updated:N/failed:0/exit 0 (happy path unaffected)', async () => {
+        ctx.taskRepo.create({ title: 'Task A', priority: 'medium' });
+        ctx.taskRepo.create({ title: 'Task B', priority: 'medium' });
+
+        const bulkCommand = await loadBulkCommand();
+        const { payload, exitCode } = await captureJsonOutput(async () => {
+            await bulkCommand.parseAsync(
+                ['edit', '--priority', 'medium', '--set-due', 'next friday', '--json', '--yes'],
+                { from: 'user' },
+            );
+        });
+
+        expect(payload.ok).toBe(true);
+        expect(exitCode === undefined || exitCode === 0).toBe(true);
+        const data = payload.data as Record<string, unknown>;
+        expect(data.updated).toBe(2);
+        expect(data.failed).toBe(0);
+        expect(data.errors).toEqual([]);
+    });
+
+    it('bulk edit all-success (--set-priority) leaves exitCode untouched (regression: happy path)', async () => {
+        const restore = silenceConsole();
+        const t1 = ctx.taskRepo.create({ title: 'Alpha', priority: 'low' });
+        const t2 = ctx.taskRepo.create({ title: 'Beta', priority: 'low' });
+
+        const bulkCommand = await loadBulkCommand();
+        await bulkCommand.parseAsync(
+            ['edit', '--priority', 'low', '--set-priority', 'urgent', '--yes'],
+            { from: 'user' },
+        );
+
+        restore();
+        expect(process.exitCode === undefined || process.exitCode === 0).toBe(true);
+        expect(ctx.taskRepo.getById(t1.id)?.priority).toBe('urgent');
+        expect(ctx.taskRepo.getById(t2.id)?.priority).toBe('urgent');
+    });
+
+    it('bulk status verb reports failure (not false success) when applyEdit throws for every task', async () => {
+        // A parent/child cycle attempt is impossible via status; instead force a throw via
+        // an invalid transition path — use a task already archived so a status write still runs
+        // through applyEdit but we assert the accounting mechanism using a spy that throws.
+        const t1 = ctx.taskRepo.create({ title: 'Task A', priority: 'urgent' });
+        const t2 = ctx.taskRepo.create({ title: 'Task B', priority: 'urgent' });
+
+        const updateSpy = vi.spyOn(ctx.taskRepo, 'update').mockImplementation(() => {
+            throw new Error('simulated update failure');
+        });
+
+        const bulkCommand = await loadBulkCommand();
+        const { payload, exitCode } = await captureJsonOutput(async () => {
+            await bulkCommand.parseAsync(['done', '--priority', 'urgent', '--json', '--yes'], { from: 'user' });
+        });
+
+        updateSpy.mockRestore();
+
+        expect(payload.ok).toBe(false);
+        expect(exitCode).toBe(4);
+        const data = payload.data as Record<string, unknown>;
+        expect(data.updated).toBe(0);
+        expect(data.failed).toBe(2);
+        // Status must remain unchanged since update() threw before persisting
+        expect(ctx.taskRepo.getById(t1.id)?.status).not.toBe('done');
+        expect(ctx.taskRepo.getById(t2.id)?.status).not.toBe('done');
+    });
+
+    it('partial failure: N-of-M accounting when only some tasks fail', async () => {
+        const t1 = ctx.taskRepo.create({ title: 'Task A', priority: 'urgent' });
+        const t2 = ctx.taskRepo.create({ title: 'Task B', priority: 'urgent' });
+
+        const originalUpdate = ctx.taskRepo.update.bind(ctx.taskRepo);
+        const updateSpy = vi.spyOn(ctx.taskRepo, 'update').mockImplementation((id, changes) => {
+            if (id === t1.id) throw new Error('simulated failure for t1');
+            return originalUpdate(id, changes);
+        });
+
+        const bulkCommand = await loadBulkCommand();
+        const { payload, exitCode } = await captureJsonOutput(async () => {
+            await bulkCommand.parseAsync(['done', '--priority', 'urgent', '--json', '--yes'], { from: 'user' });
+        });
+
+        updateSpy.mockRestore();
+
+        expect(payload.ok).toBe(false);
+        expect(exitCode).toBe(4);
+        const data = payload.data as Record<string, unknown>;
+        expect(data.updated).toBe(1);
+        expect(data.failed).toBe(1);
+        expect(ctx.taskRepo.getById(t2.id)?.status).toBe('done');
+        expect(ctx.taskRepo.getById(t1.id)?.status).not.toBe('done');
+    });
+
+    it('bulk delete mid-loop throw is counted as a failure, not an unhandled rejection', async () => {
+        const t1 = ctx.taskRepo.create({ title: 'Task A', priority: 'urgent' });
+        const t2 = ctx.taskRepo.create({ title: 'Task B', priority: 'urgent' });
+
+        const originalArchive = ctx.taskRepo.archive.bind(ctx.taskRepo);
+        const archiveSpy = vi.spyOn(ctx.taskRepo, 'archive').mockImplementation((id) => {
+            if (id === t1.id) throw new Error('simulated archive failure');
+            return originalArchive(id);
+        });
+
+        const bulkCommand = await loadBulkCommand();
+        const { payload, exitCode } = await captureJsonOutput(async () => {
+            await bulkCommand.parseAsync(['delete', '--priority', 'urgent', '--json', '--yes'], { from: 'user' });
+        });
+
+        archiveSpy.mockRestore();
+
+        expect(payload.ok).toBe(false);
+        expect(exitCode).toBe(1); // EXIT.GENERIC
+        const data = payload.data as Record<string, unknown>;
+        expect(data.updated).toBe(1);
+        expect(data.failed).toBe(1);
+        expect(ctx.taskRepo.getById(t2.id)?.status).toBe('archived');
+    });
+
+    it('bulk tag add mid-loop throw is counted as a failure, not a crash', async () => {
+        const t1 = ctx.taskRepo.create({ title: 'Task A', priority: 'urgent' });
+        const t2 = ctx.taskRepo.create({ title: 'Task B', priority: 'urgent' });
+
+        const originalAddTags = ctx.tagRepo.addTaskTags.bind(ctx.tagRepo);
+        const addTagsSpy = vi.spyOn(ctx.tagRepo, 'addTaskTags').mockImplementation((id, tagNames) => {
+            if (id === t1.id) throw new Error('simulated tag failure');
+            return originalAddTags(id, tagNames);
+        });
+
+        const bulkCommand = await loadBulkCommand();
+        const { payload, exitCode } = await captureJsonOutput(async () => {
+            await bulkCommand.parseAsync(['tag', 'add', 'urgent-tag', '--priority', 'urgent', '--json', '--yes'], { from: 'user' });
+        });
+
+        addTagsSpy.mockRestore();
+
+        expect(payload.ok).toBe(false);
+        expect(exitCode).toBe(1); // EXIT.GENERIC
+        const data = payload.data as Record<string, unknown>;
+        expect(data.updated).toBe(1);
+        expect(data.failed).toBe(1);
+        expect(ctx.tagRepo.getTaskTags(t2.id)).toContain('urgent-tag');
+        expect(ctx.tagRepo.getTaskTags(t1.id)).not.toContain('urgent-tag');
     });
 });

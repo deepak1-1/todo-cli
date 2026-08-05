@@ -11,6 +11,7 @@ import { fail, EXIT, requireEntity } from '../utils/exit.js';
 import type { AppContext } from './context.js';
 import type { Task } from '../core/types.js';
 import type { TrackingSession } from '../storage/repositories/tracking.repo.js';
+import { reopenTargetKey } from '../core/status.js';
 import type { StatusDef } from '../core/status.js';
 
 /** Start a timer on an already-resolved task and optionally advance status todo → in_progress. */
@@ -22,7 +23,7 @@ export function applyTimerStart(
     const session = ctx.trackingRepo.start(task.id, note);
     const defs = ctx.statusRepo.list();
     const startDef = defs.find(d => d.verb === 'start') ?? null;
-    const todoKey = defs.find(d => d.verb === 'reopen')?.key ?? 'todo';
+    const todoKey = reopenTargetKey(defs);
     if (startDef && task.status === todoKey) {
         ctx.taskRepo.update(task.id, { status: startDef.key });
         return { session, advancedTo: startDef };

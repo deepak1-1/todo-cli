@@ -22,6 +22,16 @@ export function isArchived(defs: StatusDef[], key: string): boolean {
     return defs.find(d => d.key === key)?.archives ?? false;
 }
 
+/** The status key tasks are moved to when archived (first archiving status by sort order). */
+export function archiveTargetKey(defs: StatusDef[]): string {
+    return defs.find(d => d.archives)?.key ?? 'archived';
+}
+
+/** The status key tasks are moved to when reopened (the status whose verb is "reopen"). */
+export function reopenTargetKey(defs: StatusDef[]): string {
+    return defs.find(d => d.verb === 'reopen')?.key ?? 'todo';
+}
+
 /** Timestamp fields to set when transitioning to a given status. */
 export function getTransitionTimestamps(
     defs: StatusDef[],

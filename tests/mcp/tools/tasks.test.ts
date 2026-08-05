@@ -704,6 +704,49 @@ describe('todo_list_tasks — extended coverage', () => {
         expect(tasks).toHaveLength(0);
     });
 
+    it('finds a search match beyond the default 100-row cap', async () => {
+        for (let i = 0; i < 120; i++) {
+            ctx.taskRepo.create({ title: `Filler ${i}`, priority: 'low' });
+        }
+        ctx.taskRepo.create({ title: 'Pay invoice ACME', priority: 'low' });
+        await loadTools();
+
+        const result = server.call('todo_list_tasks', { search: 'invoice' }) as Record<string, unknown>;
+        const content = (result.content as Array<{ text: string }>)[0];
+        const tasks = (result.structuredContent as { items: Array<Record<string, unknown>> }).items;
+
+        expect(content.text).toMatch(/Found 1 task/);
+        expect(tasks).toHaveLength(1);
+        expect(tasks[0].title).toBe('Pay invoice ACME');
+    });
+
+    it('caps search matches at an explicit limit while still searching all rows', async () => {
+        for (let i = 0; i < 120; i++) {
+            ctx.taskRepo.create({ title: `Filler ${i}`, priority: 'low' });
+        }
+        for (let i = 0; i < 5; i++) {
+            ctx.taskRepo.create({ title: `Invoice batch ${i}`, priority: 'low' });
+        }
+        await loadTools();
+
+        const result = server.call('todo_list_tasks', { search: 'invoice', limit: 2 }) as Record<string, unknown>;
+        const tasks = (result.structuredContent as { items: Array<Record<string, unknown>> }).items;
+
+        expect(tasks).toHaveLength(2);
+    });
+
+    it('non-search list still caps at the default 100 rows', async () => {
+        for (let i = 0; i < 150; i++) {
+            ctx.taskRepo.create({ title: `Task ${i}`, priority: 'low' });
+        }
+        await loadTools();
+
+        const result = server.call('todo_list_tasks', {}) as Record<string, unknown>;
+        const tasks = (result.structuredContent as { items: Array<Record<string, unknown>> }).items;
+
+        expect(tasks).toHaveLength(100);
+    });
+
     it('filters by project name', async () => {
         const project = ctx.projectRepo.create({ name: 'Work' });
         ctx.taskRepo.create({ title: 'In project', projectId: project.id });
@@ -1345,6 +1388,24 @@ describe('todo_set_status — recurring completion', () => {
         expect(all).toHaveLength(2);
         // Both the completed and the new occurrence must have the same parentId
         expect(all.every((t) => t.parentId === parent.id)).toBe(true);
+    });
+
+    // regression: re-issuing todo_set_status on an already-done recurring task (retry, duplicate call)
+    // must not spawn another next-occurrence copy.
+    it('does not spawn a duplicate occurrence when todo_set_status is re-issued on an already-done task', async () => {
+        await loadTools();
+        const add = server.call('todo_add_task', { title: 'Daily sync', recurrence: 'daily' }) as Record<string, unknown>;
+        const id = (add.structuredContent as Record<string, unknown>).id as number;
+
+        const first = server.call('todo_set_status', { id, status: 'done' }) as Record<string, unknown>;
+        expect(first).not.toHaveProperty('isError');
+        const afterFirst = ctx.taskRepo.list({ includeArchived: true }).filter((t) => t.title === 'Daily sync');
+        expect(afterFirst).toHaveLength(2);
+
+        const second = server.call('todo_set_status', { id, status: 'done' }) as Record<string, unknown>;
+        expect(second).not.toHaveProperty('isError');
+        const afterSecond = ctx.taskRepo.list({ includeArchived: true }).filter((t) => t.title === 'Daily sync');
+        expect(afterSecond).toHaveLength(2);
     });
 });
 
