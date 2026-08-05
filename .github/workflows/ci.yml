@@ -13,7 +13,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        node-version: [20.x, 22.x]
+        node-version: [22.x, 24.x]
 
     steps:
       - name: Checkout code
@@ -26,16 +26,21 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build
         run: npm run build
 
       - name: Run tests
+        if: ${{ !(matrix.os == 'ubuntu-latest' && matrix.node-version == '22.x') }}
         run: npm test
 
+      - name: Run tests with coverage
+        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '22.x'
+        run: npm run test:coverage
+
       - name: Upload coverage
-        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '20.x'
+        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '22.x'
         uses: codecov/codecov-action@v3
         with:
           files: ./coverage/lcov.info

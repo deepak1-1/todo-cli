@@ -1,10 +1,10 @@
 {
-  "name": "@todo-cli/todo",
+  "name": "@deepak.tewatia/todo-cli",
   "version": "1.0.0",
   "type": "module",
   "description": "Interactive terminal task management for developers",
   "bin": {
-    "todo": "./dist/index.js"
+    "todo": "dist/index.js"
   },
   "files": [
     "dist/",
@@ -13,6 +13,7 @@
   ],
   "scripts": {
     "build": "tsup",
+    "build:sea": "tsup --config tsup.sea.config.ts",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/ tests/ --ext .ts,.tsx",
@@ -26,6 +27,17 @@
   },
   "engines": {
     "node": ">=22.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deepak1-1/todo-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/deepak1-1/todo-cli/issues"
+  },
+  "homepage": "https://github.com/deepak1-1/todo-cli#readme",
+  "publishConfig": {
+    "access": "public"
   },
   "keywords": [
     "todo",

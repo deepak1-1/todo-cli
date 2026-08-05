@@ -11,6 +11,9 @@ import { getDataDir } from '../utils/data-dir.js';
 
 const PLUGINS_DIR = path.join(getDataDir(), 'plugins');
 
+// Indirect import so esbuild's CJS (SEA) output can't rewrite it into require()
+const dynamicImport = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<unknown>;
+
 async function validatePlugin(provider: IntegrationProvider): Promise<boolean> {
     try {
         if (!provider.name || !provider.displayName || !provider.description || !provider.version) {
@@ -95,7 +98,7 @@ export async function loadLocal(): Promise<void> {
             }
 
             const moduleUrl = `file://${indexPath}`;
-            const module = await import(moduleUrl) as { default?: IntegrationProvider; manifest?: PluginManifest };
+            const module = await dynamicImport(moduleUrl) as { default?: IntegrationProvider; manifest?: PluginManifest };
 
             if (!module.default || !module.manifest) {
                 logger.debug(`Local plugin ${entry.name} missing export`);

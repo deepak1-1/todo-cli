@@ -34,17 +34,29 @@ Connect todo-cli with your favorite tools:
 
 ## Installation
 
-Install globally via npm:
+### curl (macOS / Linux, no Node required)
 
 ```bash
-npm install -g @todo-cli/todo
+curl -fsSL https://raw.githubusercontent.com/deepak1-1/todo-cli/main/install.sh | bash
+```
+
+Installs a standalone binary to `~/.local/lib/todo-cli` and symlinks `todo` into `~/.local/bin`. Pin a version with `TODO_VERSION=vX.Y.Z`; uninstall with `... | bash -s -- --uninstall`.
+
+### npm (all platforms, including Windows)
+
+Requires Node >= 22:
+
+```bash
+npm install -g @deepak.tewatia/todo-cli
 ```
 
 Or use with npx:
 
 ```bash
-npx @todo-cli/todo
+npx @deepak.tewatia/todo-cli
 ```
+
+Note for Windows: npm is the supported install path. `better-sqlite3` ships prebuilt bindings; if your network blocks the prebuild download (e.g. a corporate proxy), npm falls back to compiling from source, which needs build tools.
 
 ## Quick Start
 
@@ -219,7 +231,7 @@ Extend todo-cli by creating custom plugins that implement the `IntegrationProvid
 ### Quick Example
 
 ```typescript
-import { IntegrationProvider } from '@todo-cli/core';
+import { IntegrationProvider } from '@deepak.tewatia/todo-cli';
 
 export class MyServicePlugin implements IntegrationProvider {
   name = 'my-service';
@@ -237,8 +249,8 @@ export class MyServicePlugin implements IntegrationProvider {
 
 ## Support
 
-- GitHub Issues: [Report bugs or request features](https://github.com/yourusername/todo-cli/issues)
-- Discussions: [GitHub Discussions](https://github.com/yourusername/todo-cli/discussions)
+- GitHub Issues: [Report bugs or request features](https://github.com/deepak1-1/todo-cli/issues)
+- Discussions: [GitHub Discussions](https://github.com/deepak1-1/todo-cli/discussions)
 
 ## License
 

@@ -1,5 +1,9 @@
 node_modules/
 dist/
+dist-sea/
+sea-out/
+sea-prep.blob
+todo-v*.tar.gz
 *.db
 *.db-journal
 .env

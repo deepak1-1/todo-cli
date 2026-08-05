@@ -1,9 +1,9 @@
 ---
 name: npm-publishing
-description: Release flow for @todo-cli/todo. Use when cutting a version, bumping deps, or changing the bin/files surface.
+description: Release flow for @deepak.tewatia/todo-cli. Use when cutting a version, bumping deps, or changing the bin/files surface.
 ---
 
-# npm publishing for @todo-cli/todo
+# npm publishing for @deepak.tewatia/todo-cli
 
 ## Pre-release gate (do not skip any step)
 1. `npm run typecheck` — zero errors.

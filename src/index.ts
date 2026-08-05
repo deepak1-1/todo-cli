@@ -110,8 +110,9 @@ program
 const firstArg = process.argv[2];
 const skipDynamic = firstArg === '--version' || firstArg === '-V' || firstArg === 'mcp';
 
-if (!skipDynamic) {
-    // Dynamically register verb commands and bulk status subcommands from the status registry.
+// Dynamically register verb commands and bulk status subcommands from the status registry.
+// Kept inside a function — top-level await would break the CJS SEA bundle.
+async function registerDynamicCommands(): Promise<void> {
     try {
         const { getContext } = await import('./commands/context.js');
         const { buildStatusCommands } = await import('./commands/status-commands.js');
@@ -154,8 +155,11 @@ function reportCliError(err: unknown): void {
 
 process.on('unhandledRejection', reportCliError);
 
-try {
+async function main(): Promise<void> {
+    if (!skipDynamic) {
+        await registerDynamicCommands();
+    }
     program.parse();
-} catch (err: unknown) {
-    reportCliError(err);
 }
+
+main().catch(reportCliError);
