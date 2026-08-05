@@ -37,4 +37,4 @@ Confirm `node_modules`, `tests/`, `src/`, `docs/` are not in the tarball.
 - Open issues / PRs referenced in the changelog get a comment with the release link.
 
 ## Native bindings
-`better-sqlite3` is rebuilt via `postinstall` (`npm rebuild better-sqlite3 2>/dev/null || true`). The `|| true` is intentional — users on Bun/Yarn or without build tools shouldn't have install fail outright. Don't tighten it.
+`better-sqlite3` v13+ bundles N-API prebuilds inside the package (`prebuilds/<platform>-<arch>.node`) — there is no postinstall rebuild step. `scripts/build-sea.sh` copies the platform prebuild as the SEA sidecar; keep its path in sync if better-sqlite3 changes layout again.

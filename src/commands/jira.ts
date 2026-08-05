@@ -23,6 +23,16 @@ jiraCommand
     .command('auth')
     .description('Authenticate with Jira Cloud')
     .option('--json', 'Output as JSON')
+    .addHelpText('after', `
+Setup — what you need before running this:
+  1. Your Jira Cloud domain, e.g. company.atlassian.net
+  2. The email address of your Atlassian account
+  3. An API token — generate one at:
+       https://id.atlassian.com/manage-profile/security/api-tokens
+     (Create API token > copy it; it is shown only once)
+
+Then run "todo jira auth" — it prompts for all three and stores them encrypted locally.
+Verify afterwards with "todo jira status"; pull issues with "todo jira pull".`)
     .action(async (opts) => {
         if (opts.json) {
             return fail(EXIT.USAGE, 'interactive auth cannot be combined with --json', { json: true, command: 'jira auth' });

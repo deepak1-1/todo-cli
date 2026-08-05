@@ -39,7 +39,8 @@ if [ "$OS" = "darwin" ]; then
 fi
 
 echo "==> Adding sidecar addon + license"
-cp node_modules/better-sqlite3/build/Release/better_sqlite3.node "$OUT_DIR/"
+# v13 ships N-API prebuilds inside the package (glibc runners, so plain linux-*)
+cp "node_modules/better-sqlite3/prebuilds/${OS}-${ARCH}.node" "$OUT_DIR/better_sqlite3.node"
 cp LICENSE "$OUT_DIR/" 2>/dev/null || true
 
 TARBALL="todo-v${VERSION}-${OS}-${ARCH}.tar.gz"

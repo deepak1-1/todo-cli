@@ -10,7 +10,7 @@ export interface ServerOptions {
 export function buildMcpServer(opts: ServerOptions): McpServer {
     const server = new McpServer({
         name: 'todo-cli',
-        version: '1.0.0',
+        version: '1.0.1',
     });
 
     registerTaskTools(server, { allowDelete: opts.allowDelete });

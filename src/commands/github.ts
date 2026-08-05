@@ -108,6 +108,18 @@ githubCommand
     .command('auth')
     .description('Check GitHub CLI authentication status')
     .option('--json', 'Output as JSON')
+    .addHelpText('after', `
+Setup — the GitHub integration uses the official GitHub CLI (gh):
+  1. Install gh:
+       macOS:    brew install gh
+       Linux:    https://github.com/cli/cli/blob/trunk/docs/install_linux.md
+       Windows:  winget install --id GitHub.cli
+  2. Log in (opens a browser flow):
+       gh auth login
+  3. Verify from todo:
+       todo gh auth
+
+No tokens are stored by todo — it delegates all GitHub calls to your authenticated gh CLI.`)
     .action(async (opts) => {
         const t = theme();
         try {

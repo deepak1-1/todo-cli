@@ -56,7 +56,7 @@ Or use with npx:
 npx @deepak.tewatia/todo-cli
 ```
 
-Note for Windows: npm is the supported install path. `better-sqlite3` ships prebuilt bindings; if your network blocks the prebuild download (e.g. a corporate proxy), npm falls back to compiling from source, which needs build tools.
+Note for Windows: npm is the supported install path. `better-sqlite3` bundles prebuilt native bindings for all major platforms directly in the package — no downloads or build tools needed.
 
 ## Quick Start
 

@@ -20,7 +20,7 @@ npx vitest run tests/core/task.test.ts
 npx vitest run -t "name pattern"   # filter by test name
 ```
 
-Requires Node >= 22. `postinstall` rebuilds the native `better-sqlite3` binding (failure is tolerated so npm install doesn't break in environments lacking build tools).
+Requires Node >= 22. `better-sqlite3` v13 bundles N-API prebuilds for all major platforms inside the package — no postinstall rebuild, no build tools needed.
 
 After `npm run build`, the CLI is executable as `./dist/index.js` (bin name `todo`).
 

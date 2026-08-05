@@ -46,7 +46,7 @@ const program = new Command();
 program
     .name('todo')
     .description('Terminal task management for developers')
-    .version('1.0.0', '-V, --version')
+    .version('1.0.1', '-V, --version')
     .option('--no-color', 'Disable colored output')
     .option('-q, --quiet', 'Minimal output')
     .option('-v, --verbose', 'Verbose output');
@@ -101,6 +101,19 @@ program
     .description('Run an MCP stdio server for AI agent integration')
     .option('--print-config', 'Print paste-ready MCP client config JSON and exit')
     .option('--allow-delete', 'Allow hard-delete via todo_delete_task tool (archives by default)')
+    .addHelpText('after', `
+Setup — connect todo to your AI agent:
+  1. Print the ready-to-paste config (it contains the absolute path to this binary):
+       todo mcp --print-config
+  2. Add it to your MCP client:
+       Claude Code:     claude mcp add todo -- todo mcp
+       Claude Desktop:  paste the printed JSON into claude_desktop_config.json
+                        (Settings > Developer > Edit Config), merging "mcpServers"
+       Cursor:          paste the printed JSON into .cursor/mcp.json (or add via
+                        Settings > MCP > Add new MCP server)
+  3. Restart the client — the todo_* tools (task CRUD + time tracking) appear automatically.
+
+By default todo_delete_task archives (undoable); start with --allow-delete to permit hard deletes.`)
     .action(async (opts) => {
         const { runMcpServer } = await import('./mcp/index.js');
         await runMcpServer({ printConfig: !!opts.printConfig, allowDelete: !!opts.allowDelete });
