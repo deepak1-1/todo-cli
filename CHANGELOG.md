@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- `todo jira pull` and `todo gh pull` now refresh already-imported tasks on re-pull: title, description, priority and due date are updated from the remote when they change (GitHub labels are synced to local tags). Local status is never changed on a normal pull — only the opt-in `--sync-status` reconciles status. Refreshes are logged as undoable `update` actions (`todo undo`). Fields the remote does not provide (e.g. GitHub due dates) are left untouched.
+
 ## [1.0.1]
 
 ### Added

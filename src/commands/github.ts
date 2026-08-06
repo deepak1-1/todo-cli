@@ -10,7 +10,8 @@ import type { ExternalTask, RegisteredPlugin } from '../plugins/index.js';
 import { GitHubClient } from '../integrations/github/github-client.js';
 import { parseGitHubRef, REPO_FORMAT_RE, GITHUB_MARKER_PREFIX } from '../integrations/github/ref.js';
 import { resolveProjectRepo } from '../integrations/github/repo-resolution.js';
-import { importRemoteTasks } from '../integrations/shared/import-tasks.js';
+import { importRemoteTasks, contentChanges, applyReconcile } from '../integrations/shared/import-tasks.js';
+import type { UpdateTaskFields } from '../core/types.js';
 import { createPluginLogger } from '../plugins/plugin-logger.js';
 import * as logger from '../utils/logger.js';
 import { success, parseId } from '../utils/format.js';
@@ -19,6 +20,13 @@ import { emitJson } from '../utils/json-output.js';
 import { runIntegrationCommand } from './_integration-runner.js';
 
 const ghLogger = createPluginLogger('github');
+
+/** Order-insensitive set comparison of two tag-name lists. */
+function sameTagSet(a: string[], b: string[]): boolean {
+    if (a.length !== b.length) return false;
+    const set = new Set(a);
+    return b.every((name) => set.has(name));
+}
 
 interface GitHubPullOpts {
     syncStatus?: boolean;
@@ -61,29 +69,35 @@ function importGitHubIssues(
         onWouldCreate: pullOpts.json ? undefined : (issue) => {
             console.log(`  ${t.success.chalk('+')} ${issue.externalRef} — ${issue.title}`);
         },
-        reconcileExisting: pullOpts.syncStatus
-            ? (existing, issue, _mapped, dry) => {
+        // Always reconcile: refresh content (title/description/priority/due date) and replace tags
+        // with the remote labels on every re-pull. Status is only touched under --sync-status.
+        reconcileExisting: (existing, issue, mapped, dry) => {
+            const changes = contentChanges(existing, mapped);
+            let statusUpdate: (Partial<UpdateTaskFields> & { status?: typeof existing.status }) | undefined;
+            if (pullOpts.syncStatus) {
                 const target = reconcilePulledStatus(
                     defs, existing.status, { isTerminal: issue.status === 'closed' }, reopenTarget,
                 );
-                if (!target || target === existing.status) return false;
-                if (dry) {
-                    if (!pullOpts.json) {
-                        console.log(`  ${t.warning.chalk('~')} #${existing.id} ${existing.status} → ${target}  ${issue.title.substring(0, 40)}`);
-                    }
-                    return true;
+                if (target && target !== existing.status) {
+                    statusUpdate = { status: target, ...getTransitionTimestamps(defs, target) };
                 }
-                ctx.taskRepo.update(existing.id, { status: target, ...getTransitionTimestamps(defs, target) });
-                ctx.actionLog.log({
-                    taskId: existing.id,
-                    action: `status_${target}`,
-                    entityType: 'task',
-                    prevState: JSON.stringify({ status: existing.status }),
-                    newState: JSON.stringify({ status: target }),
-                });
-                return true;
             }
-            : undefined,
+            // Tags aren't hydrated on the bare Task, so diff against the live tag set.
+            let tags: string[] | undefined;
+            if (mapped.tags) {
+                const local = ctx.tagRepo.getTaskTags(existing.id);
+                if (!sameTagSet(local, mapped.tags)) tags = mapped.tags;
+            }
+            return applyReconcile(ctx, existing, {
+                changes,
+                statusUpdate,
+                tags,
+                dryRun: dry,
+                onDryRunLine: pullOpts.json ? undefined : () => {
+                    console.log(`  ${t.warning.chalk('~')} ${existing.githubRef ?? issue.externalRef} — ${issue.title.substring(0, 40)}`);
+                },
+            });
+        },
     });
 }
 
@@ -155,6 +169,9 @@ githubCommand
     .option('--sync-status', 'Reconcile status of already-imported tasks (reopen ones mistakenly marked done)')
     .option('--dry-run', 'Show what would be imported/updated without writing')
     .option('--json', 'Output as JSON')
+    .addHelpText('after', `
+Re-pulling refreshes already-imported tasks: title, description, priority, due date and
+labels (as tags) are updated from GitHub. Your local status is never changed (use --sync-status).`)
     .action(async (opts) => {
         await runIntegrationCommand('github', { errorPrefix: 'Pull failed' }, async ({ plugin, credStore, ctx }) => {
             const t = theme();
@@ -247,7 +264,7 @@ githubCommand
             }
 
             console.log(table.toString());
-            console.log(success(`Created ${created} tasks, updated ${updated}, skipped ${skipped} (already imported)`));
+            console.log(success(`Created ${created} tasks, updated ${updated}, ${skipped} unchanged`));
         })();
     });
 
@@ -409,7 +426,7 @@ githubCommand
         logger.log('Syncing with GitHub...');
 
         const issues = await plugin.provider.pull(credStore, {});
-        const { created: pulled } = importGitHubIssues(issues, plugin, ctx);
+        const { created: pulled, updated: refreshed } = importGitHubIssues(issues, plugin, ctx);
 
         // Push tasks with non-archived statuses; pass defs so terminal check is registry-driven
         const statusDefs = ctx.statusRepo.list();
@@ -434,7 +451,7 @@ githubCommand
             ));
         }
 
-        console.log(success(`Sync complete: ${pulled} pulled, ${pushed} pushed`));
+        console.log(success(`Sync complete: ${pulled} pulled, ${refreshed} updated, ${pushed} pushed`));
     }));
 
 githubCommand

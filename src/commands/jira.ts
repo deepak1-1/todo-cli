@@ -12,7 +12,8 @@ import { promptUser } from '../utils/prompt.js';
 import { fail, EXIT } from '../utils/exit.js';
 import { emitJson } from '../utils/json-output.js';
 import { runIntegrationCommand } from './_integration-runner.js';
-import { importRemoteTasks } from '../integrations/shared/import-tasks.js';
+import { importRemoteTasks, contentChanges, applyReconcile } from '../integrations/shared/import-tasks.js';
+import type { UpdateTaskFields } from '../core/types.js';
 import { findByKeyOrVerb, validStatusKeys, isComplete, reconcilePulledStatus, getTransitionTimestamps, reopenTargetKey } from '../core/status.js';
 
 export const jiraCommand = new Command('jira')
@@ -58,6 +59,9 @@ jiraCommand
     .option('--dry-run', 'Show what would be imported/updated without writing')
     .option('--json', 'Output as JSON')
     .addHelpText('after', `
+Re-pulling refreshes already-imported tasks: title, description, priority and due date
+are updated from Jira. Your local status is never changed (use --sync-status for that).
+
 Examples:
   $ todo jira pull --sprint current   # "current" pulls all open sprints
   $ todo jira pull --project MYAPP --status "In Progress" --max 100`)
@@ -114,28 +118,27 @@ Examples:
                 onWouldCreate: opts.json ? undefined : (issue) => {
                     console.log(`  ${t.success.chalk('+')} ${jiraKeyOf(issue)} — ${issue.title}`);
                 },
-                reconcileExisting: syncStatus
-                    ? (existing, issue, mapped, dry) => {
+                // Always reconcile: refresh content (title/description/priority/due date) on every re-pull.
+                // Status is only touched under --sync-status; local status is otherwise preserved.
+                reconcileExisting: (existing, issue, mapped, dry) => {
+                    const changes = contentChanges(existing, mapped);
+                    let statusUpdate: (Partial<UpdateTaskFields> & { status?: typeof existing.status }) | undefined;
+                    if (syncStatus) {
                         const remote = { activeTarget: mapped.status, isTerminal: isComplete(defs, mapped.status ?? 'todo') };
                         const target = reconcilePulledStatus(defs, existing.status, remote, reopenTarget);
-                        if (!target || target === existing.status) return false;
-                        if (dry) {
-                            if (!opts.json) {
-                                console.log(`  ${t.warning.chalk('~')} ${jiraKeyOf(issue)} ${existing.status} → ${target}`);
-                            }
-                            return true;
+                        if (target && target !== existing.status) {
+                            statusUpdate = { status: target, ...getTransitionTimestamps(defs, target) };
                         }
-                        ctx.taskRepo.update(existing.id, { status: target, ...getTransitionTimestamps(defs, target) });
-                        ctx.actionLog.log({
-                            taskId: existing.id,
-                            action: `status_${target}`,
-                            entityType: 'task',
-                            prevState: JSON.stringify({ status: existing.status }),
-                            newState: JSON.stringify({ status: target }),
-                        });
-                        return true;
                     }
-                    : undefined,
+                    return applyReconcile(ctx, existing, {
+                        changes,
+                        statusUpdate,
+                        dryRun: dry,
+                        onDryRunLine: opts.json ? undefined : () => {
+                            console.log(`  ${t.warning.chalk('~')} ${jiraKeyOf(issue)} — ${issue.title}`);
+                        },
+                    });
+                },
                 onError: (issue, err) => {
                     logger.log(t.warning.chalk(`  Warning: failed to sync ${jiraKeyOf(issue)}: ${err instanceof Error ? err.message : String(err)}`));
                 },
@@ -188,7 +191,7 @@ Examples:
             }
 
             console.log(table.toString());
-            console.log(success(`Synced ${issues.length} issues (${created} new, ${updated} updated, ${skipped} already exist locally)`));
+            console.log(success(`Synced ${issues.length} issues (${created} new, ${updated} updated, ${skipped} unchanged)`));
         })();
     });
 

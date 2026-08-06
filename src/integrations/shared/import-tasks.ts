@@ -2,10 +2,12 @@
 // Centralizes the iterate → dedupe → resolve-project → mapToLocal → create → count loop;
 // each integration supplies the small bits that genuinely differ.
 
-import type { CreateTaskInput, TaskStatus, Task } from '../../core/types.js';
+import type { CreateTaskInput, TaskStatus, Task, UpdateTaskFields } from '../../core/types.js';
 import type { ExternalTask, RegisteredPlugin } from '../../plugins/index.js';
 import type { TaskRepository } from '../../storage/repositories/task.repo.js';
 import type { ProjectRepository } from '../../storage/repositories/project.repo.js';
+import type { TagRepository } from '../../storage/repositories/tag.repo.js';
+import type { ActionLogRepository } from '../../storage/repositories/action-log.repo.js';
 
 export type MappedTask = Partial<CreateTaskInput> & { status?: TaskStatus };
 
@@ -98,4 +100,87 @@ export function importRemoteTasks(opts: ImportRemoteTasksOptions): { created: nu
     }
 
     return { created, updated, skipped };
+}
+
+// Content fields a re-pull may refresh from the remote. Never includes status — status is
+// only ever touched by the opt-in --sync-status path, so local todo/in_progress is preserved.
+/** Diff a mapped remote issue against the local task; return only the changed, remote-provided scalar fields. */
+export function contentChanges(existing: Task, mapped: MappedTask): Partial<UpdateTaskFields> {
+    const c: Partial<UpdateTaskFields> = {};
+    // `!= null` guards omitted remote fields (GitHub has no native due date; priority may lack a label)
+    // from wiping locally-set values.
+    if (mapped.title != null && mapped.title !== existing.title) c.title = mapped.title;
+    if (mapped.description != null && mapped.description !== existing.description) c.description = mapped.description;
+    if (mapped.priority != null && mapped.priority !== existing.priority) c.priority = mapped.priority;
+    if (mapped.dueDate != null && mapped.dueDate !== existing.dueDate) c.dueDate = mapped.dueDate;
+    return c;
+}
+
+/** Repos an applyReconcile write needs; a structural subset of AppContext to avoid a commands→integrations dep. */
+export interface ReconcileDeps {
+    taskRepo: TaskRepository;
+    tagRepo: TagRepository;
+    actionLog: ActionLogRepository;
+}
+
+export interface ApplyReconcileOptions {
+    /** Content diff from contentChanges (never carries status). */
+    changes: Partial<UpdateTaskFields>;
+    /** {status, ...transitionTimestamps} when --sync-status yields a real transition; undefined otherwise. */
+    statusUpdate?: Partial<UpdateTaskFields> & { status?: TaskStatus };
+    /** New tag set (already diffed by the caller) to replace local tags; undefined = no tag change. */
+    tags?: string[];
+    dryRun: boolean;
+    /** Caller-supplied preview line, printed once in dryRun when a change would occur. */
+    onDryRunLine?: () => void;
+}
+
+/**
+ * Apply a re-pull reconcile to an already-imported task: merge content + optional status into one
+ * taskRepo.update, replace tags if given, and log undoable action-log entries.
+ * Returns true iff something changed (or, in dryRun, would change) — the pipeline counts it as `updated`.
+ * lastSyncedAt is stamped only when a real change occurs, so an unchanged re-pull stays a no-op.
+ */
+export function applyReconcile(deps: ReconcileDeps, existing: Task, opts: ApplyReconcileOptions): boolean {
+    const { changes, statusUpdate, tags, dryRun, onDryRunLine } = opts;
+    const hasContent = Object.keys(changes).length > 0;
+    const hasStatus = statusUpdate?.status != null && statusUpdate.status !== existing.status;
+    const hasTags = tags !== undefined;
+    if (!hasContent && !hasStatus && !hasTags) return false;
+    if (dryRun) {
+        onDryRunLine?.();
+        return true;
+    }
+
+    const update: Partial<UpdateTaskFields> = { ...changes };
+    if (hasStatus) Object.assign(update, statusUpdate);
+    update.lastSyncedAt = new Date().toISOString();
+    deps.taskRepo.update(existing.id, update);
+    if (hasTags) deps.tagRepo.setTaskTags(existing.id, tags);
+
+    // Mirror edit.ts conventions so `todo undo` can restore either kind of change.
+    if (hasStatus) {
+        deps.actionLog.log({
+            taskId: existing.id,
+            action: `status_${statusUpdate.status}`,
+            entityType: 'task',
+            prevState: JSON.stringify({ status: existing.status }),
+            newState: JSON.stringify({ status: statusUpdate.status }),
+        });
+    }
+    if (hasContent) {
+        const prev: Partial<UpdateTaskFields> = {};
+        if ('title' in changes) prev.title = existing.title;
+        if ('description' in changes) prev.description = existing.description;
+        if ('priority' in changes) prev.priority = existing.priority;
+        if ('dueDate' in changes) prev.dueDate = existing.dueDate;
+        deps.actionLog.log({
+            taskId: existing.id,
+            action: 'update',
+            entityType: 'task',
+            prevState: JSON.stringify(prev),
+            newState: JSON.stringify(changes),
+        });
+    }
+    return true;
 }
