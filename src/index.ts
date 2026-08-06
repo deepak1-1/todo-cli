@@ -46,7 +46,7 @@ const program = new Command();
 program
     .name('todo')
     .description('Terminal task management for developers')
-    .version('1.0.1', '-V, --version')
+    .version('1.1.0', '-V, --version')
     .option('--no-color', 'Disable colored output')
     .option('-q, --quiet', 'Minimal output')
     .option('-v, --verbose', 'Verbose output');
